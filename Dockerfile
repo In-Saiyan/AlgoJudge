@@ -18,8 +18,8 @@ RUN mkdir src && \
 # Copy actual source code
 COPY src ./src
 
-# Build for release
-RUN touch src/main.rs && cargo build --release
+# Build for release (touch both main.rs and lib.rs to force recompile)
+RUN touch src/main.rs src/lib.rs && cargo build --release
 
 # Runtime stage
 FROM alpine:3.19
@@ -41,6 +41,6 @@ RUN chown -R algojudge:algojudge /app /data
 # Note: Running as root for Docker socket access
 # In production, consider using Docker socket proxy
 
-EXPOSE 8080
+EXPOSE 8081
 
 CMD ["/app/algojudge"]
