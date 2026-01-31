@@ -1,5 +1,5 @@
 # Build stage
-FROM rust:1.82-alpine AS builder
+FROM rust:1.85-alpine AS builder
 
 RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconfig
 
@@ -11,7 +11,8 @@ COPY Cargo.toml Cargo.lock ./
 # Create dummy source to cache dependencies
 RUN mkdir src && \
     echo "fn main() {}" > src/main.rs && \
-    cargo build --release && \
+    echo "// dummy lib" > src/lib.rs && \
+    cargo build --release || true && \
     rm -rf src
 
 # Copy actual source code
