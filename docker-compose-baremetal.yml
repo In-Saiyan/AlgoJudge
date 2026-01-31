@@ -1,0 +1,44 @@
+# Docker Compose for supporting services only
+# Run API on bare metal with: cargo run --release
+#
+# Usage:
+#   docker compose -f docker-compose-baremetal.yml up -d
+#   export DATABASE_URL="postgresql://algojudge:algojudge@localhost:5432/algojudge"
+#   export REDIS_URL="redis://localhost:6379"
+#   export JWT_SECRET="your-secret-key-change-in-production"
+#   cargo run --release
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: algojudge-db
+    environment:
+      POSTGRES_USER: algojudge
+      POSTGRES_PASSWORD: algojudge
+      POSTGRES_DB: algojudge
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U algojudge"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: algojudge-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
