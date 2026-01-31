@@ -1,0 +1,73 @@
+[package]
+name = "algojudge"
+version = "0.1.0"
+edition = "2024"
+authors = ["AlgoJudge Team"]
+description = "An algorithmic programming judge system that benchmarks algorithmic solution submissions"
+license = "MIT"
+repository = "https://github.com/In-Saiyan/AlgoJudge"
+
+[dependencies]
+# Web Framework - Updated to v0.8.x
+axum = { version = "0.8", features = ["macros", "multipart"] }
+tower = { version = "0.5", features = ["full"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "timeout", "limit", "compression-gzip"] }
+
+# Async Runtime - Stable 1.49+ series
+tokio = { version = "1.49", features = ["full", "tracing"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Database - Updated to v0.8 with improved 2024 edition support
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "migrate"] }
+
+# Redis - Newer v0.27+ with better connection pooling
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+
+# Authentication
+jsonwebtoken = "9.3"
+argon2 = "0.5"
+
+# Docker - Updated for newer Docker API compatibility
+bollard = "0.19.4"
+
+# Validation
+validator = { version = "0.19", features = ["derive"] }
+
+# Error Handling
+thiserror = "2.0" # Major version update for 2024 edition parity
+anyhow = "1.0"
+
+# Logging & Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Date/Time & UUID
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.11", features = ["v4", "serde"] }
+
+# Environment & Async Utilities
+dotenvy = "0.15"
+async-trait = "0.1"
+futures = "0.3"
+regex = "1.11"
+rand = "0.9"
+hex = "0.4"
+base64 = "0.22"
+sha2 = "0.10"
+
+[dev-dependencies]
+# Testing - testcontainers API changed significantly (v0.26+)
+tokio-test = "0.4"
+mockall = "0.13"
+testcontainers = "0.26"
+reqwest = { version = "0.13", features = ["json"] }
+tempfile = "3.12"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

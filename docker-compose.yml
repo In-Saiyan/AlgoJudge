@@ -1,0 +1,88 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: algojudge-postgres
+    environment:
+      POSTGRES_USER: algojudge
+      POSTGRES_PASSWORD: algojudge_dev_password
+      POSTGRES_DB: algojudge
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U algojudge -d algojudge"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - algojudge-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: algojudge-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - algojudge-network
+
+  # AlgoJudge API Server (development)
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: algojudge-api
+    environment:
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 8080
+      RUST_LOG: debug
+      DATABASE_URL: postgresql://algojudge:algojudge_dev_password@postgres:5432/algojudge
+      DATABASE_MAX_CONNECTIONS: 20
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: dev-secret-change-in-production-must-be-at-least-32-chars
+      JWT_EXPIRY_HOURS: 24
+      REFRESH_TOKEN_EXPIRY_DAYS: 7
+      DOCKER_SOCKET: /var/run/docker.sock
+      BENCHMARK_NETWORK: algojudge-benchmark
+      SUBMISSIONS_PATH: /data/submissions
+      TEST_CASES_PATH: /data/test_cases
+      BENCHMARK_ITERATIONS: 5
+      BENCHMARK_WARMUP_RUNS: 1
+      BENCHMARK_TIME_LIMIT_MS: 10000
+      BENCHMARK_MEMORY_LIMIT_MB: 512
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - algojudge_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - algojudge-network
+      - algojudge-benchmark
+
+volumes:
+  postgres_data:
+  redis_data:
+  algojudge_data:
+
+networks:
+  algojudge-network:
+    driver: bridge
+  algojudge-benchmark:
+    driver: bridge
+    internal: true  # No external internet access for benchmark containers
