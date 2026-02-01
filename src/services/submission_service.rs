@@ -116,6 +116,122 @@ impl SubmissionService {
         Ok(submission)
     }
 
+    /// Create a new ZIP-based submission for algorithmic benchmarking
+    pub async fn create_zip_submission(
+        pool: &PgPool,
+        mut redis: ConnectionManager,
+        user_id: &Uuid,
+        problem_id: &Uuid,
+        contest_id: Option<&Uuid>,
+        runtime: &str,
+        zip_data: Vec<u8>,
+        custom_generator: Option<Vec<u8>>,
+        custom_generator_filename: Option<String>,
+    ) -> AppResult<Submission> {
+        // Verify problem exists and get allowed runtimes
+        #[derive(sqlx::FromRow)]
+        struct ProblemInfo {
+            allowed_runtimes: Vec<String>,
+        }
+
+        let problem = sqlx::query_as::<_, ProblemInfo>(
+            r#"SELECT allowed_runtimes FROM problems WHERE id = $1"#,
+        )
+        .bind(problem_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Problem not found".to_string()))?;
+
+        // Check if runtime is allowed
+        if !problem.allowed_runtimes.is_empty()
+            && !problem.allowed_runtimes.iter().any(|r| r == runtime)
+        {
+            return Err(AppError::Validation(format!(
+                "Runtime '{}' not allowed for this problem. Allowed: {:?}",
+                runtime, problem.allowed_runtimes
+            )));
+        }
+
+        // Get runtime ID
+        let runtime_id: Option<Uuid> = sqlx::query_scalar(
+            r#"SELECT id FROM runtimes WHERE name = $1 AND is_active = true"#,
+        )
+        .bind(runtime)
+        .fetch_optional(pool)
+        .await?;
+
+        if runtime_id.is_none() {
+            return Err(AppError::Validation(format!(
+                "Unknown or inactive runtime: {}", runtime
+            )));
+        }
+
+        // If contest submission, verify contest and participation
+        if let Some(cid) = contest_id {
+            #[derive(sqlx::FromRow)]
+            struct ContestInfo {
+                start_time: chrono::DateTime<chrono::Utc>,
+                end_time: chrono::DateTime<chrono::Utc>,
+            }
+
+            let contest = sqlx::query_as::<_, ContestInfo>(
+                r#"SELECT start_time, end_time FROM contests WHERE id = $1"#,
+            )
+            .bind(cid)
+            .fetch_optional(pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Contest not found".to_string()))?;
+
+            // Check if contest is ongoing
+            let now = chrono::Utc::now();
+            if now < contest.start_time || now > contest.end_time {
+                return Err(AppError::Validation("Contest is not active".to_string()));
+            }
+
+            // Check if user is registered
+            let is_participant: bool = sqlx::query_scalar(
+                r#"
+                SELECT EXISTS(
+                    SELECT 1 FROM contest_participants 
+                    WHERE contest_id = $1 AND user_id = $2
+                )
+                "#,
+            )
+            .bind(cid)
+            .bind(user_id)
+            .fetch_one(pool)
+            .await?;
+
+            if !is_participant {
+                return Err(AppError::Forbidden(
+                    "Not registered for this contest".to_string(),
+                ));
+            }
+        }
+
+        // Create ZIP submission
+        let submission = SubmissionRepository::create_zip_submission(
+            pool,
+            user_id,
+            problem_id,
+            contest_id,
+            runtime,
+            runtime_id,
+            zip_data,
+            custom_generator,
+            custom_generator_filename,
+            verdicts::PENDING,
+        )
+        .await?;
+
+        // Add to judging queue
+        redis
+            .lpush::<_, _, ()>("judge_queue", submission.id.to_string())
+            .await?;
+
+        Ok(submission)
+    }
+
     /// Get submission by ID
     pub async fn get_submission(pool: &PgPool, id: &Uuid) -> AppResult<SubmissionResponse> {
         let submission = SubmissionRepository::find_by_id(pool, id)

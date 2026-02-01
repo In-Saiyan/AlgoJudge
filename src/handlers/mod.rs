@@ -20,7 +20,11 @@ pub fn routes_with_state(state: AppState) -> Router<AppState> {
         .merge(health::routes())
         .nest("/auth", auth::routes())
         .nest("/users", users::routes())
-        .nest("/contests", contests::routes())
+        .nest(
+            "/contests",
+            contests::routes()
+                .route_layer(middleware::from_fn_with_state(state.clone(), auth_middleware)),
+        )
         .nest(
             "/problems",
             problems::routes()

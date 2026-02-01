@@ -19,6 +19,7 @@ use crate::state::AppState;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/", post(handler::create_submission))
+        .route("/zip", post(handler::create_zip_submission))
         .route("/", get(handler::list_submissions))
         .route("/{id}", get(handler::get_submission))
         .route("/{id}/results", get(handler::get_submission_results))

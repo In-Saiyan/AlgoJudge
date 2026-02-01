@@ -11,17 +11,74 @@ use crate::{
     handlers::contests::{
         request::{AddProblemRequest, CreateContestRequest, UpdateContestRequest},
         response::{
-            ContestProblemResponse, ContestResponse, ContestSummary, LeaderboardResponse,
-            ParticipantResponse, RegistrationResponse, VirtualParticipationResponse,
+            CollaboratorResponse, ContestProblemResponse, ContestResponse, ContestSummary, 
+            LeaderboardResponse, ParticipantResponse, RegistrationResponse, 
+            VirtualParticipationResponse,
         },
     },
-    models::Contest,
+    models::{Contest, CollaboratorRole},
 };
 
 /// Contest service for business logic
 pub struct ContestService;
 
 impl ContestService {
+    /// Check if a user can modify a contest (owner, editor collaborator, or admin)
+    pub async fn can_modify_contest(
+        pool: &PgPool,
+        user_id: &Uuid,
+        user_role: &str,
+        contest_id: &Uuid,
+    ) -> AppResult<bool> {
+        // Admins can modify any contest
+        if user_role == roles::ADMIN {
+            return Ok(true);
+        }
+        
+        // Check if user is the organizer
+        if let Some(contest) = ContestRepository::find_by_id(pool, contest_id).await? {
+            if contest.organizer_id == *user_id {
+                return Ok(true);
+            }
+        }
+        
+        // Check if user is an editor collaborator
+        if let Some(collab) = ContestRepository::get_collaborator(pool, contest_id, user_id).await? {
+            if CollaboratorRole::from_str(&collab.role) == Some(CollaboratorRole::Editor) {
+                return Ok(true);
+            }
+        }
+        
+        Ok(false)
+    }
+    
+    /// Check if a user can view contest submissions (owner, any collaborator, or admin)
+    pub async fn can_view_submissions(
+        pool: &PgPool,
+        user_id: &Uuid,
+        user_role: &str,
+        contest_id: &Uuid,
+    ) -> AppResult<bool> {
+        // Admins can view any contest submissions
+        if user_role == roles::ADMIN {
+            return Ok(true);
+        }
+        
+        // Check if user is the organizer
+        if let Some(contest) = ContestRepository::find_by_id(pool, contest_id).await? {
+            if contest.organizer_id == *user_id {
+                return Ok(true);
+            }
+        }
+        
+        // Check if user is any kind of collaborator
+        if ContestRepository::get_collaborator(pool, contest_id, user_id).await?.is_some() {
+            return Ok(true);
+        }
+        
+        Ok(false)
+    }
+
     /// Create a new contest
     pub async fn create_contest(
         pool: &PgPool,
@@ -70,10 +127,10 @@ impl ContestService {
             .await?
             .ok_or_else(|| AppError::NotFound("Contest not found".to_string()))?;
 
-        // Check permissions
-        if contest.organizer_id != *requester_id && requester_role != roles::ADMIN {
+        // Check permissions - owner, editor collaborator, or admin
+        if !Self::can_modify_contest(pool, requester_id, requester_role, id).await? {
             return Err(AppError::Forbidden(
-                "Cannot update other users' contests".to_string(),
+                "You don't have permission to modify this contest".to_string(),
             ));
         }
 
@@ -98,7 +155,7 @@ impl ContestService {
         Self::to_contest_response(pool, updated).await
     }
 
-    /// Delete contest
+    /// Delete contest - only owner or admin can delete
     pub async fn delete_contest(
         pool: &PgPool,
         id: &Uuid,
@@ -109,14 +166,101 @@ impl ContestService {
             .await?
             .ok_or_else(|| AppError::NotFound("Contest not found".to_string()))?;
 
-        // Check permissions
+        // Only owner or admin can delete (not collaborators)
         if contest.organizer_id != *requester_id && requester_role != roles::ADMIN {
             return Err(AppError::Forbidden(
-                "Cannot delete other users' contests".to_string(),
+                "Only the contest owner can delete a contest".to_string(),
             ));
         }
 
         ContestRepository::delete(pool, id).await
+    }
+    
+    /// Add a collaborator to a contest
+    pub async fn add_collaborator(
+        pool: &PgPool,
+        contest_id: &Uuid,
+        user_id: &Uuid,
+        role: CollaboratorRole,
+        added_by: &Uuid,
+        added_by_role: &str,
+    ) -> AppResult<()> {
+        let contest = ContestRepository::find_by_id(pool, contest_id)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Contest not found".to_string()))?;
+
+        // Only owner or admin can add collaborators
+        if contest.organizer_id != *added_by && added_by_role != roles::ADMIN {
+            return Err(AppError::Forbidden(
+                "Only the contest owner can add collaborators".to_string(),
+            ));
+        }
+
+        ContestRepository::add_collaborator(pool, contest_id, user_id, role.as_str(), added_by).await
+    }
+    
+    /// Remove a collaborator from a contest
+    pub async fn remove_collaborator(
+        pool: &PgPool,
+        contest_id: &Uuid,
+        user_id: &Uuid,
+        removed_by: &Uuid,
+        removed_by_role: &str,
+    ) -> AppResult<()> {
+        let contest = ContestRepository::find_by_id(pool, contest_id)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Contest not found".to_string()))?;
+
+        // Only owner or admin can remove collaborators
+        if contest.organizer_id != *removed_by && removed_by_role != roles::ADMIN {
+            return Err(AppError::Forbidden(
+                "Only the contest owner can remove collaborators".to_string(),
+            ));
+        }
+
+        ContestRepository::remove_collaborator(pool, contest_id, user_id).await
+    }
+    
+    /// List collaborators for a contest
+    pub async fn list_collaborators(
+        pool: &PgPool,
+        contest_id: &Uuid,
+    ) -> AppResult<Vec<CollaboratorResponse>> {
+        let collaborators = ContestRepository::list_collaborators(pool, contest_id).await?;
+        
+        let mut responses = Vec::new();
+        for collab in collaborators {
+            // Get user info
+            let user_info: Option<(String, Option<String>)> = sqlx::query_as(
+                r#"SELECT username, display_name FROM users WHERE id = $1"#,
+            )
+            .bind(collab.user_id)
+            .fetch_optional(pool)
+            .await?;
+            
+            let added_by_name: Option<String> = sqlx::query_scalar(
+                r#"SELECT username FROM users WHERE id = $1"#,
+            )
+            .bind(collab.added_by)
+            .fetch_optional(pool)
+            .await?;
+            
+            if let Some((username, display_name)) = user_info {
+                responses.push(CollaboratorResponse {
+                    id: collab.id,
+                    contest_id: collab.contest_id,
+                    user_id: collab.user_id,
+                    username,
+                    display_name,
+                    role: collab.role,
+                    added_by: collab.added_by,
+                    added_by_name: added_by_name.unwrap_or_default(),
+                    created_at: collab.created_at,
+                });
+            }
+        }
+        
+        Ok(responses)
     }
 
     /// List contests with pagination

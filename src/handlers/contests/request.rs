@@ -103,3 +103,14 @@ pub struct LeaderboardQuery {
     /// Include frozen standings
     pub include_frozen: Option<bool>,
 }
+
+/// Add collaborator request
+#[derive(Debug, Deserialize, Validate)]
+pub struct AddCollaboratorRequest {
+    /// User ID to add as collaborator
+    pub user_id: uuid::Uuid,
+    
+    /// Role: 'editor' (can modify problems) or 'viewer' (can only view submissions)
+    #[validate(length(min = 1, max = 20))]
+    pub role: String,
+}

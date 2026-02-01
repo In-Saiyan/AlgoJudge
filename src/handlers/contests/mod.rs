@@ -28,6 +28,10 @@ pub fn routes() -> Router<AppState> {
         .route("/{id}/register", post(handler::register_for_contest))
         .route("/{id}/unregister", post(handler::unregister_from_contest))
         .route("/{id}/participants", get(handler::list_participants))
+        // Collaborators (organizer can add users to help manage)
+        .route("/{id}/collaborators", get(handler::list_collaborators))
+        .route("/{id}/collaborators", post(handler::add_collaborator))
+        .route("/{id}/collaborators/{user_id}", delete(handler::remove_collaborator))
         // Contest problems
         .route("/{id}/problems", get(handler::list_contest_problems))
         .route("/{id}/problems", post(handler::add_problem_to_contest))

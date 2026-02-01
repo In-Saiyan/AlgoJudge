@@ -146,3 +146,18 @@ pub struct VirtualParticipationResponse {
     pub virtual_start: DateTime<Utc>,
     pub virtual_end: DateTime<Utc>,
 }
+
+/// Collaborator response
+#[derive(Debug, Serialize)]
+pub struct CollaboratorResponse {
+    pub id: Uuid,
+    pub contest_id: Uuid,
+    pub user_id: Uuid,
+    pub username: String,
+    pub display_name: Option<String>,
+    /// Role: 'editor' or 'viewer'
+    pub role: String,
+    pub added_by: Uuid,
+    pub added_by_name: String,
+    pub created_at: DateTime<Utc>,
+}

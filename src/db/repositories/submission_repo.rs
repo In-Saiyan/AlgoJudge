@@ -38,6 +38,45 @@ impl SubmissionRepository {
         Ok(submission)
     }
 
+    /// Create a new ZIP-based submission
+    pub async fn create_zip_submission(
+        pool: &PgPool,
+        user_id: &Uuid,
+        problem_id: &Uuid,
+        contest_id: Option<&Uuid>,
+        runtime_name: &str,
+        runtime_id: Option<Uuid>,
+        submission_zip: Vec<u8>,
+        custom_generator_binary: Option<Vec<u8>>,
+        custom_generator_filename: Option<String>,
+        verdict: &str,
+    ) -> AppResult<Submission> {
+        let submission = sqlx::query_as::<_, Submission>(
+            r#"
+            INSERT INTO submissions (
+                user_id, problem_id, contest_id, language, source_code, 
+                submission_zip, runtime_id, custom_generator_binary, 
+                custom_generator_filename, verdict
+            )
+            VALUES ($1, $2, $3, $4, '', $5, $6, $7, $8, $9)
+            RETURNING *
+            "#,
+        )
+        .bind(user_id)
+        .bind(problem_id)
+        .bind(contest_id)
+        .bind(runtime_name)
+        .bind(&submission_zip)
+        .bind(runtime_id)
+        .bind(&custom_generator_binary)
+        .bind(&custom_generator_filename)
+        .bind(verdict)
+        .fetch_one(pool)
+        .await?;
+
+        Ok(submission)
+    }
+
     /// Find submission by ID
     pub async fn find_by_id(pool: &PgPool, id: &Uuid) -> AppResult<Option<Submission>> {
         let submission = sqlx::query_as::<_, Submission>(r#"SELECT * FROM submissions WHERE id = $1"#)
@@ -211,5 +250,48 @@ impl SubmissionRepository {
         .await?;
 
         Ok(count)
+    }
+
+    /// Save test case result for algorithmic benchmarking
+    pub async fn save_test_case_result(
+        pool: &PgPool,
+        submission_id: &Uuid,
+        test_case_number: i32,
+        verdict: &str,
+        execution_time_ms: Option<f64>,
+        memory_usage_kb: Option<i64>,
+        match_percentage: Option<f64>,
+        verifier_output: Option<&str>,
+        error_message: Option<&str>,
+    ) -> AppResult<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO test_case_results (
+                submission_id, test_case_number, verdict, 
+                execution_time_ms, memory_usage_kb, match_percentage,
+                verifier_output, error_message
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (submission_id, test_case_number) DO UPDATE SET
+                verdict = EXCLUDED.verdict,
+                execution_time_ms = EXCLUDED.execution_time_ms,
+                memory_usage_kb = EXCLUDED.memory_usage_kb,
+                match_percentage = EXCLUDED.match_percentage,
+                verifier_output = EXCLUDED.verifier_output,
+                error_message = EXCLUDED.error_message
+            "#,
+        )
+        .bind(submission_id)
+        .bind(test_case_number)
+        .bind(verdict)
+        .bind(execution_time_ms.map(|t| t as i32))
+        .bind(memory_usage_kb.map(|m| m as i32))
+        .bind(match_percentage)
+        .bind(verifier_output)
+        .bind(error_message)
+        .execute(pool)
+        .await?;
+
+        Ok(())
     }
 }

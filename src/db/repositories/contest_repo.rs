@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::{error::AppResult, models::Contest};
+use crate::{error::AppResult, models::{Contest, ContestCollaborator}};
 
 /// Repository for contest database operations
 pub struct ContestRepository;
@@ -276,5 +276,83 @@ impl ContestRepository {
             .await?;
 
         Ok(count)
+    }
+    
+    // ========================================================================
+    // Collaborator Management
+    // ========================================================================
+    
+    /// Add a collaborator to a contest
+    pub async fn add_collaborator(
+        pool: &PgPool,
+        contest_id: &Uuid,
+        user_id: &Uuid,
+        role: &str,
+        added_by: &Uuid,
+    ) -> AppResult<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO contest_collaborators (contest_id, user_id, role, added_by)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (contest_id, user_id) DO UPDATE SET role = $3
+            "#,
+        )
+        .bind(contest_id)
+        .bind(user_id)
+        .bind(role)
+        .bind(added_by)
+        .execute(pool)
+        .await?;
+        
+        Ok(())
+    }
+    
+    /// Remove a collaborator from a contest
+    pub async fn remove_collaborator(
+        pool: &PgPool,
+        contest_id: &Uuid,
+        user_id: &Uuid,
+    ) -> AppResult<()> {
+        sqlx::query(
+            r#"DELETE FROM contest_collaborators WHERE contest_id = $1 AND user_id = $2"#,
+        )
+        .bind(contest_id)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+        
+        Ok(())
+    }
+    
+    /// Get a collaborator for a contest
+    pub async fn get_collaborator(
+        pool: &PgPool,
+        contest_id: &Uuid,
+        user_id: &Uuid,
+    ) -> AppResult<Option<ContestCollaborator>> {
+        let collab = sqlx::query_as::<_, ContestCollaborator>(
+            r#"SELECT * FROM contest_collaborators WHERE contest_id = $1 AND user_id = $2"#,
+        )
+        .bind(contest_id)
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?;
+        
+        Ok(collab)
+    }
+    
+    /// List all collaborators for a contest
+    pub async fn list_collaborators(
+        pool: &PgPool,
+        contest_id: &Uuid,
+    ) -> AppResult<Vec<ContestCollaborator>> {
+        let collabs = sqlx::query_as::<_, ContestCollaborator>(
+            r#"SELECT * FROM contest_collaborators WHERE contest_id = $1 ORDER BY created_at"#,
+        )
+        .bind(contest_id)
+        .fetch_all(pool)
+        .await?;
+        
+        Ok(collabs)
     }
 }

@@ -18,12 +18,13 @@ use crate::{
 
 use super::{
     request::{
-        AddProblemRequest, CreateContestRequest, LeaderboardQuery, ListContestsQuery,
-        UpdateContestRequest,
+        AddCollaboratorRequest, AddProblemRequest, CreateContestRequest, LeaderboardQuery, 
+        ListContestsQuery, UpdateContestRequest,
     },
     response::{
-        ContestProblemsResponse, ContestResponse, ContestsListResponse, LeaderboardResponse,
-        ParticipantsListResponse, RegistrationResponse, VirtualParticipationResponse,
+        CollaboratorResponse, ContestProblemsResponse, ContestResponse, ContestsListResponse, 
+        LeaderboardResponse, ParticipantsListResponse, RegistrationResponse, 
+        VirtualParticipationResponse,
     },
 };
 
@@ -204,6 +205,72 @@ pub async fn remove_problem_from_contest(
 
     Ok(StatusCode::NO_CONTENT)
 }
+
+// ============================================================================
+// Collaborator Management
+// ============================================================================
+
+/// List collaborators for a contest
+pub async fn list_collaborators(
+    State(state): State<AppState>,
+    auth_user: AuthenticatedUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<Vec<CollaboratorResponse>>> {
+    // Only owner, collaborators, or admin can see collaborators
+    if !ContestService::can_view_submissions(state.db(), &auth_user.id, &auth_user.role, &id).await? {
+        return Err(AppError::Forbidden(
+            "You don't have permission to view collaborators".to_string(),
+        ));
+    }
+
+    let collaborators = ContestService::list_collaborators(state.db(), &id).await?;
+    Ok(Json(collaborators))
+}
+
+/// Add a collaborator to a contest
+pub async fn add_collaborator(
+    State(state): State<AppState>,
+    auth_user: AuthenticatedUser,
+    Path(id): Path<Uuid>,
+    Json(payload): Json<AddCollaboratorRequest>,
+) -> AppResult<StatusCode> {
+    let role = crate::models::CollaboratorRole::from_str(&payload.role)
+        .ok_or_else(|| AppError::Validation("Invalid role. Use 'editor' or 'viewer'".to_string()))?;
+
+    ContestService::add_collaborator(
+        state.db(),
+        &id,
+        &payload.user_id,
+        role,
+        &auth_user.id,
+        &auth_user.role,
+    )
+    .await?;
+
+    Ok(StatusCode::CREATED)
+}
+
+/// Remove a collaborator from a contest
+pub async fn remove_collaborator(
+    State(state): State<AppState>,
+    auth_user: AuthenticatedUser,
+    Path((id, user_id)): Path<(Uuid, Uuid)>,
+) -> AppResult<StatusCode> {
+    ContestService::remove_collaborator(
+        state.db(),
+        &id,
+        &user_id,
+        &auth_user.id,
+        &auth_user.role,
+    )
+    .await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ============================================================================
+// Leaderboard and Virtual Participation
+// ============================================================================
 
 /// Get contest leaderboard
 pub async fn get_leaderboard(

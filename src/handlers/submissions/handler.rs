@@ -5,6 +5,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
+use base64::Engine;
 use uuid::Uuid;
 use validator::Validate;
 
@@ -17,7 +18,7 @@ use crate::{
 };
 
 use super::{
-    request::{CreateSubmissionRequest, ListSubmissionsQuery},
+    request::{CreateSubmissionRequest, CreateZipSubmissionRequest, ListSubmissionsQuery},
     response::{
         CreateSubmissionResponse, SubmissionResponse, SubmissionResultsResponse,
         SubmissionSourceResponse, SubmissionsListResponse,
@@ -54,6 +55,59 @@ pub async fn create_submission(
         Json(CreateSubmissionResponse {
             id: submission.id,
             message: "Submission received and queued for judging".to_string(),
+            status: submission.verdict,
+        }),
+    ))
+}
+
+/// Create a new ZIP-based submission for algorithmic benchmarking
+/// 
+/// ZIP must contain:
+/// - compile.sh: Script to compile the solution
+/// - run.sh: Script to run the compiled binary
+/// 
+/// The compiled binary should be named after the problem code (A, B, etc.)
+pub async fn create_zip_submission(
+    State(state): State<AppState>,
+    auth_user: AuthenticatedUser,
+    Json(payload): Json<CreateZipSubmissionRequest>,
+) -> AppResult<(StatusCode, Json<CreateSubmissionResponse>)> {
+    payload.validate()?;
+
+    // Decode base64 ZIP
+    let zip_data = base64::engine::general_purpose::STANDARD
+        .decode(&payload.submission_zip_base64)
+        .map_err(|e| AppError::Validation(format!("Invalid base64 for ZIP: {}", e)))?;
+
+    // Decode optional custom generator
+    let custom_generator = if let Some(ref gen_b64) = payload.custom_generator_base64 {
+        Some(
+            base64::engine::general_purpose::STANDARD
+                .decode(gen_b64)
+                .map_err(|e| AppError::Validation(format!("Invalid base64 for generator: {}", e)))?,
+        )
+    } else {
+        None
+    };
+
+    let submission = SubmissionService::create_zip_submission(
+        state.db(),
+        state.redis(),
+        &auth_user.id,
+        &payload.problem_id,
+        payload.contest_id.as_ref(),
+        &payload.runtime,
+        zip_data,
+        custom_generator,
+        payload.custom_generator_filename.clone(),
+    )
+    .await?;
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(CreateSubmissionResponse {
+            id: submission.id,
+            message: "ZIP submission received and queued for algorithmic benchmarking".to_string(),
             status: submission.verdict,
         }),
     ))
