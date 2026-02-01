@@ -9,6 +9,7 @@ use axum::{
     Extension,
 };
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 use uuid::Uuid;
 
 use crate::{error::AppError, services::AuthService, state::AppState};
@@ -56,27 +57,51 @@ pub async fn auth_middleware(
     mut request: Request<Body>,
     next: Next,
 ) -> Result<Response, AppError> {
+    let uri = request.uri().clone();
+    
     let auth_header = request
         .headers()
         .get(AUTHORIZATION)
-        .and_then(|h| h.to_str().ok())
-        .ok_or(AppError::Unauthorized)?;
+        .and_then(|h| h.to_str().ok());
+    
+    if auth_header.is_none() {
+        debug!(path = %uri.path(), "Auth failed: No Authorization header");
+        return Err(AppError::Unauthorized);
+    }
+    
+    let auth_header = auth_header.unwrap();
 
     if !auth_header.starts_with("Bearer ") {
+        debug!(path = %uri.path(), header = %auth_header, "Auth failed: Invalid Authorization format (expected 'Bearer <token>')");
         return Err(AppError::Unauthorized);
     }
 
     let token = &auth_header[7..];
+    debug!(path = %uri.path(), token_length = token.len(), "Verifying JWT token");
 
-    let claims = AuthService::verify_token(token, &state.config().jwt.secret)?;
+    let claims = match AuthService::verify_token(token, &state.config().jwt.secret) {
+        Ok(claims) => {
+            debug!(path = %uri.path(), sub = %claims.sub, username = %claims.username, "Token verified successfully");
+            claims
+        },
+        Err(e) => {
+            debug!(path = %uri.path(), error = ?e, "Auth failed: Token verification failed");
+            return Err(e);
+        }
+    };
 
-    let user_id = Uuid::parse_str(&claims.sub).map_err(|_| AppError::InvalidToken)?;
+    let user_id = Uuid::parse_str(&claims.sub).map_err(|e| {
+        debug!(path = %uri.path(), sub = %claims.sub, error = ?e, "Auth failed: Invalid user ID in token");
+        AppError::InvalidToken
+    })?;
 
     let user = AuthenticatedUser {
         id: user_id,
-        username: claims.username,
-        role: claims.role,
+        username: claims.username.clone(),
+        role: claims.role.clone(),
     };
+    
+    debug!(path = %uri.path(), user_id = %user_id, username = %user.username, role = %user.role, "User authenticated successfully");
 
     request.extensions_mut().insert(user);
     Ok(next.run(request).await)
