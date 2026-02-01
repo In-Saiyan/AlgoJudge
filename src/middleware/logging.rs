@@ -8,7 +8,7 @@ use axum::{
     response::Response,
 };
 use std::time::Instant;
-use tracing::{info, warn};
+use tracing::{info, warn, debug};
 
 /// Request logging middleware
 pub async fn logging_middleware(request: Request<Body>, next: Next) -> Response {
@@ -16,6 +16,14 @@ pub async fn logging_middleware(request: Request<Body>, next: Next) -> Response 
     let method = request.method().clone();
     let uri = request.uri().clone();
     let path = uri.path().to_string();
+    
+    // Debug logging for incoming request details
+    debug!(
+        method = %method,
+        path = %path,
+        query = ?uri.query(),
+        "Incoming request"
+    );
 
     let response = next.run(request).await;
 
@@ -23,6 +31,15 @@ pub async fn logging_middleware(request: Request<Body>, next: Next) -> Response 
     let status = response.status();
 
     let duration_ms = duration.as_secs_f64() * 1000.0;
+    
+    // Debug logging for response details
+    debug!(
+        method = %method,
+        path = %path,
+        status = %status.as_u16(),
+        duration_ms = %format!("{:.3}", duration_ms),
+        "Response generated"
+    );
 
     if status.is_server_error() {
         warn!(
