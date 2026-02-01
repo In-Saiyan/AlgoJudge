@@ -10,9 +10,9 @@ pub mod problems;
 pub mod submissions;
 pub mod users;
 
-use axum::Router;
+use axum::{middleware, Router};
 
-use crate::state::AppState;
+use crate::{middleware::auth::auth_middleware, state::AppState};
 
 /// Create all API routes
 pub fn routes() -> Router<AppState> {
@@ -23,5 +23,8 @@ pub fn routes() -> Router<AppState> {
         .nest("/contests", contests::routes())
         .nest("/problems", problems::routes())
         .nest("/submissions", submissions::routes())
-        .nest("/admin", admin::routes())
+        .nest(
+            "/admin",
+            admin::routes().route_layer(middleware::from_fn(auth_middleware)),
+        )
 }
