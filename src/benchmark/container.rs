@@ -288,4 +288,173 @@ impl ContainerManager {
 
         (user_time + sys_time) * 1000.0 // Convert to ms
     }
+
+    // =========================================================================
+    // Methods for ZIP-based algorithmic benchmarking
+    // =========================================================================
+
+    /// Copy and extract a ZIP file to the container workspace
+    pub async fn copy_zip_to_container(&self, container_id: &str, zip_data: &[u8]) -> AppResult<()> {
+        // Encode ZIP as base64 and decode in container
+        let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, zip_data);
+        
+        // Write base64 data to container and decode
+        let cmd = format!(
+            "echo '{}' | base64 -d > /workspace/submission.zip && cd /workspace && unzip -o submission.zip && rm submission.zip && chmod +x *.sh 2>/dev/null || true",
+            encoded
+        );
+
+        let result = self.exec_command(container_id, &cmd).await?;
+        if result.exit_code != 0 {
+            return Err(anyhow::anyhow!(
+                "Failed to extract ZIP: {}",
+                result.stderr.unwrap_or_default()
+            ).into());
+        }
+
+        Ok(())
+    }
+
+    /// Copy a binary file to the container
+    pub async fn copy_binary_to_container(
+        &self,
+        container_id: &str,
+        binary_data: &[u8],
+        filename: &str,
+    ) -> AppResult<()> {
+        let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, binary_data);
+        
+        let cmd = format!(
+            "echo '{}' | base64 -d > /workspace/{} && chmod +x /workspace/{}",
+            encoded, filename, filename
+        );
+
+        let result = self.exec_command(container_id, &cmd).await?;
+        if result.exit_code != 0 {
+            return Err(anyhow::anyhow!(
+                "Failed to copy binary '{}': {}",
+                filename,
+                result.stderr.unwrap_or_default()
+            ).into());
+        }
+
+        Ok(())
+    }
+
+    /// Run a shell script in the container
+    pub async fn run_script(
+        &self,
+        container_id: &str,
+        script_name: &str,
+        timeout_ms: u64,
+    ) -> AppResult<String> {
+        let timeout_secs = (timeout_ms as f64 / 1000.0).max(1.0);
+        let cmd = format!(
+            "cd /workspace && timeout {}s ./{} 2>&1",
+            timeout_secs, script_name
+        );
+
+        let result = self.exec_command(container_id, &cmd).await?;
+        
+        if result.exit_code == 124 {
+            return Err(anyhow::anyhow!("Script '{}' timed out", script_name).into());
+        }
+
+        if result.exit_code != 0 {
+            return Err(anyhow::anyhow!(
+                "Script '{}' failed with exit code {}: {}{}",
+                script_name,
+                result.exit_code,
+                result.stdout,
+                result.stderr.unwrap_or_default()
+            ).into());
+        }
+
+        Ok(result.stdout)
+    }
+
+    /// Check if a file exists in the container
+    pub async fn file_exists(&self, container_id: &str, filename: &str) -> AppResult<bool> {
+        let cmd = format!("test -f /workspace/{} && echo 'EXISTS'", filename);
+        let result = self.exec_command(container_id, &cmd).await?;
+        
+        Ok(result.stdout.contains("EXISTS"))
+    }
+
+    /// Run a command in the container and return output
+    pub async fn run_command(
+        &self,
+        container_id: &str,
+        cmd: &str,
+        timeout_ms: u64,
+    ) -> AppResult<String> {
+        let timeout_secs = (timeout_ms as f64 / 1000.0).max(1.0);
+        let full_cmd = format!("cd /workspace && timeout {}s {}", timeout_secs, cmd);
+
+        let result = self.exec_command(container_id, &full_cmd).await?;
+        
+        if result.exit_code == 124 {
+            return Err(anyhow::anyhow!("Command timed out").into());
+        }
+
+        Ok(result.stdout)
+    }
+
+    /// Run a command with metrics collection
+    pub async fn run_with_metrics(
+        &self,
+        container_id: &str,
+        cmd: &str,
+        timeout_ms: u64,
+        memory_limit_kb: u64,
+    ) -> AppResult<MetricsResult> {
+        let timeout_secs = (timeout_ms as f64 / 1000.0).max(1.0);
+        
+        // Use /usr/bin/time -v to get memory and CPU stats
+        let full_cmd = format!(
+            "cd /workspace && timeout {}s /usr/bin/time -v sh -c '{}' 2>&1",
+            timeout_secs, cmd.replace("'", "'\\''")
+        );
+
+        let start = std::time::Instant::now();
+        let result = self.exec_command(container_id, &full_cmd).await?;
+        let wall_time_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+        // Check timeout
+        if result.exit_code == 124 || wall_time_ms > timeout_ms as f64 + 500.0 {
+            return Err(anyhow::anyhow!("time limit exceeded").into());
+        }
+
+        // Parse time output
+        let (stdout, time_output) = self.split_time_output(&result.stdout);
+        let memory_kb = self.parse_memory_usage(&time_output);
+
+        // Check memory limit
+        if memory_kb > memory_limit_kb as i64 {
+            return Err(anyhow::anyhow!("memory limit exceeded").into());
+        }
+
+        // Check for runtime errors
+        if result.exit_code != 0 {
+            return Err(anyhow::anyhow!(
+                "Runtime error (exit code {}): {}",
+                result.exit_code,
+                result.stderr.unwrap_or_default()
+            ).into());
+        }
+
+        Ok(MetricsResult {
+            time_ms: wall_time_ms,
+            memory_kb,
+            output: stdout,
+        })
+    }
+}
+
+/// Result with metrics from execution
+#[derive(Debug)]
+pub struct MetricsResult {
+    pub time_ms: f64,
+    pub memory_kb: i64,
+    pub output: String,
 }
