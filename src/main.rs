@@ -52,22 +52,35 @@ async fn main() -> anyhow::Result<()> {
     let redis_client = RedisClient::open(CONFIG.redis.url.as_str())?;
     let redis_conn = redis::aio::ConnectionManager::new(redis_client).await?;
 
-    // Initialize Docker client
+    // Initialize Docker client (optional - submissions won't work without it)
     tracing::info!("Connecting to Docker...");
-    let docker = Docker::connect_with_socket_defaults()?;
-
-    // Verify Docker connection
-    let docker_info = docker.version().await?;
-    tracing::info!(
-        "Connected to Docker version: {}",
-        docker_info.version.unwrap_or_default()
-    );
+    let docker = match Docker::connect_with_socket_defaults() {
+        Ok(docker) => {
+            match docker.version().await {
+                Ok(info) => {
+                    tracing::info!(
+                        "Connected to Docker version: {}",
+                        info.version.unwrap_or_default()
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!("Docker connected but version check failed: {}. Submissions will not work.", e);
+                }
+            }
+            docker
+        }
+        Err(e) => {
+            tracing::warn!("Docker not available: {}. Submissions will not work.", e);
+            Docker::connect_with_local_defaults()?
+        }
+    };
 
     // Create application state
     let state = AppState::new(db_pool, redis_conn, docker, CONFIG.clone());
 
     // Build the router
     let app = Router::new()
+        .merge(handlers::health::routes())  // Health at root level
         .nest("/api/v1", handlers::routes())
         .layer(TraceLayer::new_for_http())
         .layer(CompressionLayer::new())
