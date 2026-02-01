@@ -21,8 +21,16 @@ pub fn routes_with_state(state: AppState) -> Router<AppState> {
         .nest("/auth", auth::routes())
         .nest("/users", users::routes())
         .nest("/contests", contests::routes())
-        .nest("/problems", problems::routes())
-        .nest("/submissions", submissions::routes())
+        .nest(
+            "/problems",
+            problems::routes()
+                .route_layer(middleware::from_fn_with_state(state.clone(), auth_middleware)),
+        )
+        .nest(
+            "/submissions",
+            submissions::routes()
+                .route_layer(middleware::from_fn_with_state(state.clone(), auth_middleware)),
+        )
         .nest(
             "/admin",
             admin::routes()
