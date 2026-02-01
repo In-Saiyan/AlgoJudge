@@ -24,8 +24,8 @@ pub struct ProblemResponse {
     pub is_public: bool,
     pub author_id: Uuid,
     pub author_name: String,
-    pub solved_count: i32,
-    pub attempt_count: i32,
+    pub solved_count: i64,
+    pub attempt_count: i64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -48,8 +48,8 @@ pub struct ProblemSummary {
     pub tags: Vec<String>,
     pub time_limit_ms: i32,
     pub memory_limit_kb: i32,
-    pub solved_count: i32,
-    pub attempt_count: i32,
+    pub solved_count: i64,
+    pub attempt_count: i64,
 }
 
 /// Test case response
