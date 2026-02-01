@@ -27,6 +27,9 @@ impl ProblemService {
     ) -> AppResult<ProblemResponse> {
         debug!(author_id = %author_id, title = %payload.title, "Creating new problem");
         
+        // Start a transaction for atomic problem + test cases creation
+        let mut tx = pool.begin().await?;
+        
         let samples_json = payload
             .samples
             .map(|s| serde_json::to_value(s).unwrap_or(serde_json::Value::Null));
@@ -34,7 +37,7 @@ impl ProblemService {
         debug!("Serialized samples JSON");
 
         let problem = match ProblemRepository::create(
-            pool,
+            &mut *tx,
             &payload.title,
             &payload.description,
             payload.input_format.as_deref(),
@@ -56,9 +59,42 @@ impl ProblemService {
             },
             Err(e) => {
                 debug!(error = ?e, "Failed to create problem in database");
+                tx.rollback().await?;
                 return Err(e);
             }
         };
+
+        // Create test cases if provided
+        if let Some(test_cases) = payload.test_cases {
+            debug!(problem_id = %problem.id, test_case_count = test_cases.len(), "Creating test cases");
+            
+            for (index, tc_req) in test_cases.into_iter().enumerate() {
+                let order = (index + 1) as i32;
+                match ProblemRepository::create_test_case(
+                    &mut *tx,
+                    &problem.id,
+                    &tc_req.input,
+                    &tc_req.expected_output,
+                    tc_req.is_sample.unwrap_or(false),
+                    tc_req.points,
+                    order,
+                )
+                .await {
+                    Ok(tc) => {
+                        debug!(test_case_id = %tc.id, order = order, "Test case created");
+                    },
+                    Err(e) => {
+                        debug!(error = ?e, order = order, "Failed to create test case, rolling back");
+                        tx.rollback().await?;
+                        return Err(e);
+                    }
+                }
+            }
+        }
+
+        // Commit the transaction
+        tx.commit().await?;
+        debug!(problem_id = %problem.id, "Transaction committed successfully");
 
         debug!(problem_id = %problem.id, "Converting to response");
         Self::to_problem_response(pool, problem).await

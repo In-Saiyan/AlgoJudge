@@ -43,6 +43,9 @@ pub struct CreateProblemRequest {
 
     /// Is this problem visible to participants?
     pub is_public: Option<bool>,
+
+    /// Test cases to create with the problem (optional)
+    pub test_cases: Option<Vec<CreateTestCaseRequest>>,
 }
 
 /// Sample input/output pair

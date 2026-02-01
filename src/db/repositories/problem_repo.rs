@@ -1,6 +1,6 @@
 //! Problem repository
 
-use sqlx::PgPool;
+use sqlx::{PgPool, Executor, Postgres};
 use uuid::Uuid;
 
 use crate::{error::AppResult, models::{Problem, TestCase}};
@@ -10,8 +10,8 @@ pub struct ProblemRepository;
 
 impl ProblemRepository {
     /// Create a new problem
-    pub async fn create(
-        pool: &PgPool,
+    pub async fn create<'e, E>(
+        executor: E,
         title: &str,
         description: &str,
         input_format: Option<&str>,
@@ -25,7 +25,10 @@ impl ProblemRepository {
         tags: &[String],
         is_public: bool,
         author_id: &Uuid,
-    ) -> AppResult<Problem> {
+    ) -> AppResult<Problem>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
         let problem = sqlx::query_as::<_, Problem>(
             r#"
             INSERT INTO problems (
@@ -50,7 +53,7 @@ impl ProblemRepository {
         .bind(tags)
         .bind(is_public)
         .bind(author_id)
-        .fetch_one(pool)
+        .fetch_one(executor)
         .await?;
 
         Ok(problem)
@@ -187,15 +190,18 @@ impl ProblemRepository {
     }
 
     /// Create test case
-    pub async fn create_test_case(
-        pool: &PgPool,
+    pub async fn create_test_case<'e, E>(
+        executor: E,
         problem_id: &Uuid,
         input: &str,
         expected_output: &str,
         is_sample: bool,
         points: Option<i32>,
         order: i32,
-    ) -> AppResult<TestCase> {
+    ) -> AppResult<TestCase>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
         let test_case = sqlx::query_as::<_, TestCase>(
             r#"
             INSERT INTO test_cases (problem_id, input, expected_output, is_sample, points, "order")
@@ -209,7 +215,7 @@ impl ProblemRepository {
         .bind(is_sample)
         .bind(points)
         .bind(order)
-        .fetch_one(pool)
+        .fetch_one(executor)
         .await?;
 
         Ok(test_case)
