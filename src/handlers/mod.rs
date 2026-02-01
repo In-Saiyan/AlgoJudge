@@ -14,8 +14,8 @@ use axum::{middleware, Router};
 
 use crate::{middleware::auth::auth_middleware, state::AppState};
 
-/// Create all API routes
-pub fn routes() -> Router<AppState> {
+/// Create all API routes with state
+pub fn routes_with_state(state: AppState) -> Router<AppState> {
     Router::new()
         .merge(health::routes())
         .nest("/auth", auth::routes())
@@ -25,6 +25,20 @@ pub fn routes() -> Router<AppState> {
         .nest("/submissions", submissions::routes())
         .nest(
             "/admin",
-            admin::routes().route_layer(middleware::from_fn(auth_middleware)),
+            admin::routes()
+                .route_layer(middleware::from_fn_with_state(state, auth_middleware)),
         )
+}
+
+/// Create all API routes (without middleware that requires state)
+/// Note: Use routes_with_state() when auth middleware is needed
+pub fn routes() -> Router<AppState> {
+    Router::new()
+        .merge(health::routes())
+        .nest("/auth", auth::routes())
+        .nest("/users", users::routes())
+        .nest("/contests", contests::routes())
+        .nest("/problems", problems::routes())
+        .nest("/submissions", submissions::routes())
+        .nest("/admin", admin::routes())
 }

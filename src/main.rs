@@ -81,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
     // Build the router
     let app = Router::new()
         .merge(handlers::health::routes())  // Health at root level
-        .nest("/api/v1", handlers::routes())
+        .nest("/api/v1", handlers::routes_with_state(state.clone()))
         .layer(TraceLayer::new_for_http())
         .layer(CompressionLayer::new())
         .layer(
