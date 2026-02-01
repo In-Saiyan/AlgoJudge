@@ -30,10 +30,10 @@ pub struct CreateProblemRequest {
     pub notes: Option<String>,
 
     /// Time limit in milliseconds
-    pub time_limit_ms: i64,
+    pub time_limit_ms: i32,
 
     /// Memory limit in kilobytes
-    pub memory_limit_kb: i64,
+    pub memory_limit_kb: i32,
 
     /// Problem difficulty (optional)
     pub difficulty: Option<String>,
@@ -67,8 +67,8 @@ pub struct UpdateProblemRequest {
     pub constraints: Option<String>,
     pub samples: Option<Vec<SampleIO>>,
     pub notes: Option<String>,
-    pub time_limit_ms: Option<i64>,
-    pub memory_limit_kb: Option<i64>,
+    pub time_limit_ms: Option<i32>,
+    pub memory_limit_kb: Option<i32>,
     pub difficulty: Option<String>,
     pub tags: Option<Vec<String>>,
     pub is_public: Option<bool>,

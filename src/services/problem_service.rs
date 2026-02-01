@@ -327,8 +327,8 @@ impl ProblemService {
 
         #[derive(sqlx::FromRow)]
         struct ProblemStats {
-            solved_count: i64,
-            attempt_count: i64,
+            solved_count: i32,
+            attempt_count: i32,
         }
 
         let stats = sqlx::query_as::<_, ProblemStats>(
@@ -375,8 +375,8 @@ impl ProblemService {
     async fn to_problem_summary(pool: &PgPool, problem: Problem) -> AppResult<ProblemSummary> {
         #[derive(sqlx::FromRow)]
         struct ProblemStats {
-            solved_count: i64,
-            attempt_count: i64,
+            solved_count: i32,
+            attempt_count: i32,
         }
 
         let stats = sqlx::query_as::<_, ProblemStats>(

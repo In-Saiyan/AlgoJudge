@@ -16,8 +16,8 @@ pub struct Problem {
     pub constraints: Option<String>,
     pub samples: Option<serde_json::Value>,
     pub notes: Option<String>,
-    pub time_limit_ms: i64,
-    pub memory_limit_kb: i64,
+    pub time_limit_ms: i32,
+    pub memory_limit_kb: i32,
     pub difficulty: Option<String>,
     pub tags: Vec<String>,
     pub is_public: bool,
@@ -33,7 +33,7 @@ impl Problem {
     }
 
     /// Get memory limit in megabytes
-    pub fn memory_limit_mb(&self) -> i64 {
+    pub fn memory_limit_mb(&self) -> i32 {
         self.memory_limit_kb / 1024
     }
 }
