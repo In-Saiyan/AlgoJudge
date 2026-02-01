@@ -1,6 +1,7 @@
 //! Problem service
 
 use sqlx::PgPool;
+use tracing::debug;
 use uuid::Uuid;
 
 use crate::{
@@ -24,11 +25,15 @@ impl ProblemService {
         author_id: &Uuid,
         payload: CreateProblemRequest,
     ) -> AppResult<ProblemResponse> {
+        debug!(author_id = %author_id, title = %payload.title, "Creating new problem");
+        
         let samples_json = payload
             .samples
             .map(|s| serde_json::to_value(s).unwrap_or(serde_json::Value::Null));
 
-        let problem = ProblemRepository::create(
+        debug!("Serialized samples JSON");
+
+        let problem = match ProblemRepository::create(
             pool,
             &payload.title,
             &payload.description,
@@ -44,8 +49,18 @@ impl ProblemService {
             payload.is_public.unwrap_or(false),
             author_id,
         )
-        .await?;
+        .await {
+            Ok(p) => {
+                debug!(problem_id = %p.id, "Problem created successfully in database");
+                p
+            },
+            Err(e) => {
+                debug!(error = ?e, "Failed to create problem in database");
+                return Err(e);
+            }
+        };
 
+        debug!(problem_id = %problem.id, "Converting to response");
         Self::to_problem_response(pool, problem).await
     }
 

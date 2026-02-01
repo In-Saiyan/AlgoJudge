@@ -168,10 +168,12 @@ impl IntoResponse for AppError {
         let message = match &self {
             AppError::Internal(e) => {
                 tracing::error!("Internal error: {:?}", e);
+                tracing::debug!("Internal error details: {:#?}", e);
                 "An internal error occurred".to_string()
             }
             AppError::Database(e) => {
                 tracing::error!("Database error: {}", e);
+                tracing::debug!("Database error details: {}", e);
                 "A database error occurred".to_string()
             }
             _ => self.to_string(),
