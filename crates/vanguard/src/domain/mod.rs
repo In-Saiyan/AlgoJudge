@@ -4,4 +4,5 @@ pub mod auth;
 pub mod contests;
 pub mod health;
 pub mod problems;
+pub mod submissions;
 pub mod users;

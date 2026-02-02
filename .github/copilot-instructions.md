@@ -168,7 +168,7 @@ This is an incremental implementation roadmap. Complete phases in order. Each ph
 - [ ] Create temporary build directory
 - [ ] Unzip submission from storage
 - [ ] Execute `compile.sh` in isolated container
-  - [ ] Network disabled
+  - [ ] Network disable/enable toggle in env and config
   - [ ] 30-second timeout
 - [ ] Handle compilation success
   - [ ] Move binary to `/mnt/data/binaries/users/{submission_id}_bin`

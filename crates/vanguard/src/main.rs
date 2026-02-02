@@ -23,7 +23,7 @@ use tower_http::{
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config::{create_db_pool, create_redis_pool, Config, RateLimitConfig};
-use crate::domain::{auth, contests, health, problems, users};
+use crate::domain::{auth, contests, health, problems, submissions, users};
 use crate::middleware::{auth::auth_middleware, rate_limit::*};
 use crate::state::AppState;
 
@@ -180,13 +180,41 @@ fn create_router(state: AppState) -> Router {
                 .layer(axum_middleware::from_fn_with_state(state.clone(), auth_middleware)),
         );
 
+    // Contest leaderboard routes
+    let contest_leaderboard_routes = Router::new()
+        .route("/{contest_id}/leaderboard", get(submissions::get_contest_leaderboard));
+
+    // Submission routes (all protected)
+    let submission_routes = Router::new()
+        .route("/", post(submissions::create_submission))
+        .route("/zip", post(submissions::create_zip_submission))
+        .route("/", get(submissions::list_submissions))
+        .route("/{id}", get(submissions::get_submission))
+        .route("/{id}/results", get(submissions::get_submission_results))
+        .route("/{id}/source", get(submissions::get_submission_source))
+        .layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ));
+
+    // User submissions route
+    let user_submissions_routes = Router::new()
+        .route(
+            "/{id}/submissions",
+            get(submissions::get_user_submissions)
+                .layer(axum_middleware::from_fn_with_state(state.clone(), auth_middleware)),
+        );
+
     // API v1 routes
     let api_v1 = Router::new()
         .nest("/auth", auth_routes)
         .nest("/users", user_routes)
+        .merge(Router::new().nest("/users", user_submissions_routes))
         .nest("/contests", contest_routes)
         .merge(Router::new().nest("/contests", contest_problems_routes))
+        .merge(Router::new().nest("/contests", contest_leaderboard_routes))
         .nest("/problems", problem_routes)
+        .nest("/submissions", submission_routes)
         .layer(axum_middleware::from_fn_with_state(
             state.clone(),
             api_rate_limit_middleware,
