@@ -25,7 +25,7 @@ pub struct RegisterRequest {
 pub struct LoginRequest {
     /// Can be username or email
     #[validate(length(min = 1, message = "Username or email is required"))]
-    pub login: String,
+    pub identifier: String,
 
     #[validate(length(min = 1, message = "Password is required"))]
     pub password: String,

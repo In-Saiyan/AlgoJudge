@@ -160,7 +160,7 @@ pub async fn login(
         WHERE username = $1 OR email = $1
         "#
     )
-    .bind(&payload.login)
+    .bind(&payload.identifier)
     .fetch_optional(&state.db)
     .await?
     .ok_or(ApiError::InvalidCredentials)?;
