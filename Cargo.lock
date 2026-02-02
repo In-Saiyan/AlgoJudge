@@ -2825,6 +2825,7 @@ dependencies = [
  "axum",
  "chrono",
  "deadpool-redis 0.18.0",
+ "dotenvy",
  "jsonwebtoken",
  "lazy_static",
  "olympus-common",

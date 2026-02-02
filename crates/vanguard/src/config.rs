@@ -30,6 +30,9 @@ pub struct Config {
 impl Config {
     /// Load configuration from environment variables
     pub fn from_env() -> Self {
+        // Load .env file if it exists (ignore errors if not found)
+        dotenvy::dotenv().ok();
+
         Self {
             host: env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
             port: env::var("PORT")
