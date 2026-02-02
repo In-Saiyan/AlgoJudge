@@ -22,7 +22,7 @@ use tower_http::{
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config::{create_db_pool, create_redis_pool, Config, RateLimitConfig};
-use crate::domain::{auth, health};
+use crate::domain::{auth, contests, health, problems, users};
 use crate::middleware::{auth::auth_middleware, rate_limit::*};
 use crate::state::AppState;
 
@@ -116,9 +116,76 @@ fn create_router(state: AppState) -> Router {
         .merge(public_auth_routes)
         .merge(protected_auth_routes);
 
+    // Public user routes
+    let public_user_routes = Router::new()
+        .route("/", get(users::list_users))
+        .route("/{id}", get(users::get_user))
+        .route("/{id}/stats", get(users::get_user_stats));
+
+    // Protected user routes
+    let protected_user_routes = Router::new()
+        .route("/{id}", axum::routing::put(users::update_user))
+        .layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ));
+
+    // Combine user routes
+    let user_routes = Router::new()
+        .merge(public_user_routes)
+        .merge(protected_user_routes);
+
+    // Public contest routes
+    let public_contest_routes = contests::contest_routes();
+
+    // Protected contest routes
+    let protected_contest_routes = contests::protected_contest_routes()
+        .layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ));
+
+    // Combine contest routes
+    let contest_routes = Router::new()
+        .merge(public_contest_routes)
+        .merge(protected_contest_routes);
+
+    // Public problem routes
+    let public_problem_routes = problems::problem_routes();
+
+    // Protected problem routes
+    let protected_problem_routes = problems::protected_problem_routes()
+        .layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ));
+
+    // Combine problem routes
+    let problem_routes = Router::new()
+        .merge(public_problem_routes)
+        .merge(protected_problem_routes);
+
+    // Contest problems routes (nested under contests)
+    let contest_problems_routes = Router::new()
+        .route("/{contest_id}/problems", axum::routing::get(problems::list_contest_problems))
+        .route(
+            "/{contest_id}/problems",
+            axum::routing::post(problems::add_problem_to_contest)
+                .layer(axum_middleware::from_fn_with_state(state.clone(), auth_middleware)),
+        )
+        .route(
+            "/{contest_id}/problems/{problem_id}",
+            axum::routing::delete(problems::remove_problem_from_contest)
+                .layer(axum_middleware::from_fn_with_state(state.clone(), auth_middleware)),
+        );
+
     // API v1 routes
     let api_v1 = Router::new()
         .nest("/auth", auth_routes)
+        .nest("/users", user_routes)
+        .nest("/contests", contest_routes)
+        .merge(Router::new().nest("/contests", contest_problems_routes))
+        .nest("/problems", problem_routes)
         .layer(axum_middleware::from_fn_with_state(
             state.clone(),
             api_rate_limit_middleware,

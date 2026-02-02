@@ -67,57 +67,57 @@ This is an incremental implementation roadmap. Complete phases in order. Each ph
 - [x] Add `429 Too Many Requests` error response
 
 #### 1.5 User Management
-- [ ] Implement `GET /api/v1/users`
-- [ ] Implement `GET /api/v1/users/{id}`
-- [ ] Implement `PUT /api/v1/users/{id}` (owner only)
-- [ ] Implement `GET /api/v1/users/{id}/stats`
+- [x] Implement `GET /api/v1/users`
+- [x] Implement `GET /api/v1/users/{id}`
+- [x] Implement `PUT /api/v1/users/{id}` (owner only)
+- [x] Implement `GET /api/v1/users/{id}/stats`
 
 ---
 
-### Phase 2: Vanguard - Contests & Problems
+### Phase 2: Vanguard - Contests & Problems ✅
 **Goal:** Contest and problem management APIs.
 
 #### 2.1 Database Migrations
-- [ ] `contests` table
-- [ ] `contest_participants` table
-- [ ] `contest_collaborators` table
-- [ ] `problems` table
-- [ ] `contest_problems` junction table
-- [ ] `test_cases` table (legacy)
+- [x] `contests` table
+- [x] `contest_participants` table
+- [x] `contest_collaborators` table
+- [x] `problems` table
+- [x] `contest_problems` junction table
+- [x] `test_cases` table (legacy)
 
 #### 2.2 Contest Endpoints
-- [ ] Implement `GET /api/v1/contests`
-- [ ] Implement `POST /api/v1/contests` (organizer/admin)
-- [ ] Implement `GET /api/v1/contests/{id}`
-- [ ] Implement `PUT /api/v1/contests/{id}`
-- [ ] Implement `DELETE /api/v1/contests/{id}`
+- [x] Implement `GET /api/v1/contests`
+- [x] Implement `POST /api/v1/contests` (organizer/admin)
+- [x] Implement `GET /api/v1/contests/{id}`
+- [x] Implement `PUT /api/v1/contests/{id}`
+- [x] Implement `DELETE /api/v1/contests/{id}`
 
 #### 2.3 Contest Registration
-- [ ] Implement `POST /api/v1/contests/{id}/register`
-- [ ] Implement `POST /api/v1/contests/{id}/unregister`
-- [ ] Implement `GET /api/v1/contests/{id}/participants`
+- [x] Implement `POST /api/v1/contests/{id}/register`
+- [x] Implement `POST /api/v1/contests/{id}/unregister`
+- [x] Implement `GET /api/v1/contests/{id}/participants`
 
 #### 2.4 Contest Collaborators
-- [ ] Implement `GET /api/v1/contests/{id}/collaborators`
-- [ ] Implement `POST /api/v1/contests/{id}/collaborators`
-- [ ] Implement `DELETE /api/v1/contests/{id}/collaborators/{user_id}`
+- [x] Implement `GET /api/v1/contests/{id}/collaborators`
+- [x] Implement `POST /api/v1/contests/{id}/collaborators`
+- [x] Implement `DELETE /api/v1/contests/{id}/collaborators/{user_id}`
 
 #### 2.5 Problems
-- [ ] Implement `GET /api/v1/problems`
-- [ ] Implement `POST /api/v1/problems` (with generator/verifier upload)
-- [ ] Implement `GET /api/v1/problems/{id}`
-- [ ] Implement `PUT /api/v1/problems/{id}`
-- [ ] Implement `DELETE /api/v1/problems/{id}`
-- [ ] Implement `GET /api/v1/contests/{id}/problems`
-- [ ] Implement `POST /api/v1/contests/{id}/problems`
-- [ ] Implement `DELETE /api/v1/contests/{id}/problems/{problem_id}`
+- [x] Implement `GET /api/v1/problems`
+- [x] Implement `POST /api/v1/problems` (with generator/verifier upload)
+- [x] Implement `GET /api/v1/problems/{id}`
+- [x] Implement `PUT /api/v1/problems/{id}`
+- [x] Implement `DELETE /api/v1/problems/{id}`
+- [x] Implement `GET /api/v1/contests/{id}/problems`
+- [x] Implement `POST /api/v1/contests/{id}/problems`
+- [x] Implement `DELETE /api/v1/contests/{id}/problems/{problem_id}`
 
 #### 2.6 Authorization Rules (olympus-rules)
-- [ ] Create `IsParticipant(contest_id)` spec
-- [ ] Create `IsCollaborator(contest_id)` spec
-- [ ] Create `IsContestOwner(contest_id)` spec
-- [ ] Create `IsProblemOwner(problem_id)` spec
-- [ ] Integrate rules into contest/problem handlers
+- [ ] ⭐ Create `IsParticipant(contest_id)` spec
+- [ ] ⭐ Create `IsCollaborator(contest_id)` spec
+- [ ] ⭐ Create `IsContestOwner(contest_id)` spec
+- [ ] ⭐ Create `IsProblemOwner(problem_id)` spec
+- [ ] ⭐ Integrate rules into contest/problem handlers
 
 ---
 
