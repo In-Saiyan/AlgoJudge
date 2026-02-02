@@ -20,7 +20,7 @@ This is an incremental implementation roadmap. Complete phases in order. Each ph
   - [x] Implement `And<A, B>`, `Or<A, B>`, `Not<A>` combinators
   - [x] Implement `BitAnd`, `BitOr`, `Not` operator overloading
   - [x] Add `RuleConfig` serde structs for JSON serialization
-  - [ ] ⭐ Create `SpecRegistry` for dynamic rule building
+  - [x] Create `SpecRegistry` for dynamic rule building
 - [x] Setup shared `docker-compose.yml` for local development
   - [x] PostgreSQL service
   - [x] Redis service
@@ -113,10 +113,15 @@ This is an incremental implementation roadmap. Complete phases in order. Each ph
 - [x] Implement `DELETE /api/v1/contests/{id}/problems/{problem_id}`
 
 #### 2.6 Authorization Rules (olympus-rules)
-- [ ] ⭐ Create `IsParticipant(contest_id)` spec
-- [ ] ⭐ Create `IsCollaborator(contest_id)` spec
-- [ ] ⭐ Create `IsContestOwner(contest_id)` spec
-- [ ] ⭐ Create `IsProblemOwner(problem_id)` spec
+- [x] Create `IsParticipant(contest_id)` spec
+- [x] Create `IsCollaborator(contest_id)` spec
+- [x] Create `IsContestOwner(contest_id)` spec
+- [x] Create `IsProblemOwner(problem_id)` spec
+- [x] Create `IsSubmissionOwner(submission_id)` spec
+- [x] Create `CanAccessProblemBinaries` spec
+- [x] Create `NotRateLimited` spec with Redis check
+- [x] Create `AuthContext` with db/redis pools
+- [x] Create `SpecRegistry` for dynamic rule building
 - [ ] ⭐ Integrate rules into contest/problem handlers
 
 ---
@@ -145,9 +150,9 @@ This is an incremental implementation roadmap. Complete phases in order. Each ph
 - [x] Implement `GET /api/v1/users/{id}/submissions`
 
 #### 3.3 Submission Authorization Rules
-- [ ] ⭐ Create `IsSubmissionOwner(submission_id)` spec
-- [ ] ⭐ Create `CanSubmitToContest(contest_id)` composite rule
-  - [ ] `IsValidUser & ((!IsRateLimited & IsParticipant) | IsAdmin)`
+- [x] Create `IsSubmissionOwner(submission_id)` spec
+- [x] Create `CanSubmitToContest(contest_id)` composite rule
+  - [x] `IsValidUser & ((!NotRateLimited & IsParticipant) | IsAdmin | IsCollaborator)`
 - [ ] ⭐ Integrate rules into submission handlers
 
 #### 3.4 Leaderboard
@@ -161,32 +166,32 @@ This is an incremental implementation roadmap. Complete phases in order. Each ph
 **Goal:** Compilation worker consuming from Redis Stream.
 
 #### 4.1 Project Setup
-- [ ] Initialize `sisyphus` crate
-- [ ] Setup Redis Stream consumer (`XREADGROUP`)
-- [ ] Create consumer group `sisyphus_group` on startup
+- [x] Initialize `sisyphus` crate
+- [x] Setup Redis Stream consumer (`XREADGROUP`)
+- [x] Create consumer group `sisyphus_group` on startup
 
 #### 4.2 Compilation Pipeline
-- [ ] Implement job consumer loop
-- [ ] Create temporary build directory
-- [ ] Unzip submission from storage
-- [ ] Execute `compile.sh` in isolated container
-  - [ ] Network disable/enable toggle in env and config
-  - [ ] 30-second timeout
-- [ ] Handle compilation success
-  - [ ] Move binary to `/mnt/data/binaries/users/{submission_id}_bin`
-  - [ ] Update DB status: `COMPILED`
-  - [ ] Push to `run_queue` Redis Stream
-  - [ ] `XACK` the message
-- [ ] Handle compilation failure
-  - [ ] Capture stderr logs
-  - [ ] Update DB status: `COMPILATION_ERROR`
-  - [ ] Store logs for user feedback
-  - [ ] `XACK` the message
+- [x] Implement job consumer loop
+- [x] Create temporary build directory
+- [x] Unzip submission from storage
+- [x] Execute `compile.sh` in isolated container
+  - [x] Network disable/enable toggle in env and config
+  - [x] 30-second timeout
+- [x] Handle compilation success
+  - [x] Move binary to `/mnt/data/binaries/users/{submission_id}_bin`
+  - [x] Update DB status: `COMPILED`
+  - [x] Push to `run_queue` Redis Stream
+  - [x] `XACK` the message
+- [x] Handle compilation failure
+  - [x] Capture stderr logs
+  - [x] Update DB status: `COMPILATION_ERROR`
+  - [x] Store logs for user feedback
+  - [x] `XACK` the message
 
 #### 4.3 Error Handling & Resilience
-- [ ] Implement dead letter handling for failed jobs
-- [ ] Add retry logic with exponential backoff
-- [ ] Graceful shutdown (finish current job)
+- [x] Implement dead letter handling for failed jobs
+- [x] Add retry logic with exponential backoff
+- [x] Graceful shutdown (finish current job)
 
 ---
 

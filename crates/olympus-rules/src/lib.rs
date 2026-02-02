@@ -26,6 +26,7 @@ pub mod operators;
 pub mod context;
 pub mod config;
 pub mod rules;
+pub mod registry;
 
 #[cfg(feature = "auth")]
 pub mod auth_rules;
@@ -39,9 +40,12 @@ pub mod prelude {
     pub use crate::context::{EvalContext, FileContext, ExecutionContext};
     pub use crate::config::{RuleConfig, NamedRuleConfig, CleanupPolicy, CleanupAction};
     pub use crate::rules::*;
+    pub use crate::registry::{SpecRegistry, file_context_registry, execution_context_registry};
     
     #[cfg(feature = "auth")]
     pub use crate::context::AuthContext;
     #[cfg(feature = "auth")]
     pub use crate::auth_rules::*;
+    #[cfg(feature = "auth")]
+    pub use crate::registry::auth_context_registry;
 }

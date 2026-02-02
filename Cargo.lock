@@ -2177,9 +2177,9 @@ name = "sisyphus"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "deadpool-redis 0.22.1",
  "olympus-common",
- "redis 1.0.3",
  "serde",
  "serde_json",
  "sqlx",
