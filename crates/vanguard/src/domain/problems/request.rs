@@ -57,8 +57,8 @@ pub struct CreateProblemRequest {
     #[serde(default = "default_num_test_cases")]
     pub num_test_cases: i32,
 
-    pub generator_path: Option<String>,
-    pub checker_path: Option<String>,
+    // Note: generator and checker binaries are uploaded separately via
+    // POST /api/v1/problems/{id}/generator and POST /api/v1/problems/{id}/checker
 
     #[validate(range(min = 1, max = 10000, message = "Max score must be 1-10000"))]
     #[serde(default = "default_max_score")]
@@ -118,8 +118,8 @@ pub struct UpdateProblemRequest {
     #[validate(range(min = 1, max = 100, message = "Number of test cases must be 1-100"))]
     pub num_test_cases: Option<i32>,
 
-    pub generator_path: Option<String>,
-    pub checker_path: Option<String>,
+    // Note: generator and checker binaries are uploaded separately via
+    // POST /api/v1/problems/{id}/generator and POST /api/v1/problems/{id}/checker
 
     #[validate(range(min = 1, max = 10000, message = "Max score must be 1-10000"))]
     pub max_score: Option<i32>,

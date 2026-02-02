@@ -1,7 +1,7 @@
 //! Problem handlers.
 
 use axum::{
-    extract::{Extension, Path, Query, State},
+    extract::{Extension, Multipart, Path, Query, State},
     http::StatusCode,
     Json,
 };
@@ -62,7 +62,7 @@ struct ProblemRow {
 /// List problems with pagination and filtering.
 pub async fn list_problems(
     State(state): State<AppState>,
-    user: Option<Extension<AuthUser>>,
+    _user: Option<Extension<AuthUser>>,
     Query(query): Query<ListProblemsQuery>,
 ) -> ApiResult<Json<ProblemListResponse>> {
     let page = query.page.max(1);
@@ -158,6 +158,8 @@ pub async fn create_problem(
     let now = Utc::now();
     let difficulty = payload.difficulty.as_ref().map(|d| d.to_string());
 
+    // Note: generator_path and checker_path are set to NULL on creation
+    // They will be populated when binaries are uploaded via separate endpoints
     sqlx::query(
         r#"
         INSERT INTO problems (
@@ -167,8 +169,8 @@ pub async fn create_problem(
             max_score, partial_scoring, is_public, allowed_languages, owner_id,
             created_at, updated_at
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-            $17, $18, $19, $20, $21, $22, $22
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NULL, NULL,
+            $15, $16, $17, $18, $19, $20, $20
         )
         "#
     )
@@ -186,8 +188,6 @@ pub async fn create_problem(
         .bind(payload.time_limit_ms)
         .bind(payload.memory_limit_kb)
         .bind(payload.num_test_cases)
-        .bind(&payload.generator_path)
-        .bind(&payload.checker_path)
         .bind(payload.max_score)
         .bind(payload.partial_scoring)
         .bind(payload.is_public)
@@ -215,8 +215,9 @@ pub async fn create_problem(
             time_limit_ms: payload.time_limit_ms,
             memory_limit_kb: payload.memory_limit_kb,
             num_test_cases: payload.num_test_cases,
-            generator_path: payload.generator_path,
-            checker_path: payload.checker_path,
+            status: "draft".to_string(),
+            generator_uploaded: false,
+            checker_uploaded: false,
             max_score: payload.max_score,
             partial_scoring: payload.partial_scoring,
             is_public: payload.is_public,
@@ -224,6 +225,7 @@ pub async fn create_problem(
             owner_id: user.id,
             created_at: now,
             updated_at: now,
+            message: Some("Problem created. Upload generator and checker binaries to activate.".to_string()),
         }),
     ))
 }
@@ -337,8 +339,8 @@ pub async fn update_problem(
     let time_limit_ms = payload.time_limit_ms.unwrap_or(problem.time_limit_ms);
     let memory_limit_kb = payload.memory_limit_kb.unwrap_or(problem.memory_limit_kb);
     let num_test_cases = payload.num_test_cases.unwrap_or(problem.num_test_cases);
-    let generator_path = payload.generator_path.or(problem.generator_path);
-    let checker_path = payload.checker_path.or(problem.checker_path);
+    // Note: generator_path and checker_path are not updated here
+    // They are updated via the dedicated upload endpoints
     let max_score = payload.max_score.unwrap_or(problem.max_score);
     let partial_scoring = payload.partial_scoring.unwrap_or(problem.partial_scoring);
     let is_public = payload.is_public.unwrap_or(problem.is_public);
@@ -352,8 +354,8 @@ pub async fn update_problem(
             title = $2, description = $3, input_format = $4, output_format = $5,
             constraints = $6, sample_input = $7, sample_output = $8, sample_explanation = $9,
             difficulty = $10, tags = $11, time_limit_ms = $12, memory_limit_kb = $13,
-            num_test_cases = $14, generator_path = $15, checker_path = $16, max_score = $17,
-            partial_scoring = $18, is_public = $19, allowed_languages = $20, updated_at = $21
+            num_test_cases = $14, max_score = $15,
+            partial_scoring = $16, is_public = $17, allowed_languages = $18, updated_at = $19
         WHERE id = $1
         "#
     )
@@ -371,8 +373,6 @@ pub async fn update_problem(
         .bind(time_limit_ms)
         .bind(memory_limit_kb)
         .bind(num_test_cases)
-        .bind(&generator_path)
-        .bind(&checker_path)
         .bind(max_score)
         .bind(partial_scoring)
         .bind(is_public)
@@ -381,6 +381,11 @@ pub async fn update_problem(
         .execute(&state.db)
         .await
         .map_err(|e| ApiError::Internal(format!("Failed to update problem: {}", e)))?;
+
+    // Determine problem status based on binary uploads
+    let generator_uploaded = problem.generator_path.is_some();
+    let checker_uploaded = problem.checker_path.is_some();
+    let status = if generator_uploaded && checker_uploaded { "ready" } else { "draft" };
 
     Ok(Json(ProblemResponse {
         id: problem_id,
@@ -397,8 +402,9 @@ pub async fn update_problem(
         time_limit_ms,
         memory_limit_kb,
         num_test_cases,
-        generator_path,
-        checker_path,
+        status: status.to_string(),
+        generator_uploaded,
+        checker_uploaded,
         max_score,
         partial_scoring,
         is_public,
@@ -406,6 +412,7 @@ pub async fn update_problem(
         owner_id: problem.owner_id,
         created_at: problem.created_at,
         updated_at: now,
+        message: None,
     }))
 }
 
@@ -708,9 +715,357 @@ pub async fn remove_problem_from_contest(
     Ok(StatusCode::NO_CONTENT)
 }
 
+// =============================================================================
+// Binary Upload Handlers (Generator & Checker)
+// =============================================================================
+
+/// Maximum binary file size (50MB)
+const MAX_BINARY_SIZE: usize = 50 * 1024 * 1024;
+
+/// Validate that uploaded file is a valid ELF executable
+fn validate_elf_binary(data: &[u8]) -> Result<(), ApiError> {
+    // ELF magic number: 0x7F 'E' 'L' 'F'
+    if data.len() < 4 || &data[0..4] != b"\x7fELF" {
+        return Err(ApiError::Validation(
+            "Uploaded file is not a valid Linux ELF executable".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Check if user has permission to access/modify problem binaries.
+/// 
+/// Access is granted to:
+/// 1. Admins (role = "admin")
+/// 2. Problem owner (owner_id matches user.id)
+/// 3. Organizers (role = "organizer") who own a contest containing this problem
+/// 4. Collaborators of any contest that contains this problem
+async fn check_problem_binary_permission(
+    state: &AppState,
+    problem_id: Uuid,
+    user: &AuthUser,
+) -> Result<(), ApiError> {
+    // Admins can always access
+    if user.role == "admin" {
+        return Ok(());
+    }
+
+    // Check if user is the problem owner
+    let owner_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT owner_id FROM problems WHERE id = $1"
+    )
+    .bind(problem_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+
+    match owner_id {
+        Some(id) if id == user.id => return Ok(()),
+        None => return Err(ApiError::NotFound("Problem not found".to_string())),
+        _ => {}
+    }
+
+    // Check if user is an organizer who owns a contest containing this problem
+    let is_contest_owner: Option<bool> = sqlx::query_scalar(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM contest_problems cp
+            JOIN contests c ON c.id = cp.contest_id
+            WHERE cp.problem_id = $1 AND c.owner_id = $2
+        )
+        "#
+    )
+    .bind(problem_id)
+    .bind(user.id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+
+    if is_contest_owner.unwrap_or(false) {
+        return Ok(());
+    }
+
+    // Check if user is a collaborator of any contest containing this problem
+    // Collaborators with can_add_problems permission can manage problem binaries
+    let is_collaborator: Option<bool> = sqlx::query_scalar(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM contest_problems cp
+            JOIN contest_collaborators cc ON cc.contest_id = cp.contest_id
+            WHERE cp.problem_id = $1 
+              AND cc.user_id = $2
+              AND cc.can_add_problems = true
+        )
+        "#
+    )
+    .bind(problem_id)
+    .bind(user.id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+
+    if is_collaborator.unwrap_or(false) {
+        return Ok(());
+    }
+
+    Err(ApiError::Forbidden)
+}
+
+/// POST /api/v1/problems/{id}/generator
+/// 
+/// Upload generator binary for a problem.
+/// The binary will be stored at /mnt/data/binaries/problems/{problem_id}/generator
+pub async fn upload_generator(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(problem_id): Path<Uuid>,
+    mut multipart: Multipart,
+) -> ApiResult<Json<MessageResponse>> {
+    // Check permission
+    check_problem_binary_permission(&state, problem_id, &user).await?;
+
+    // Process multipart upload
+    let mut file_data: Option<Vec<u8>> = None;
+
+    while let Some(field) = multipart.next_field().await.map_err(|e| {
+        ApiError::Validation(format!("Failed to read multipart: {}", e))
+    })? {
+        let name = field.name().unwrap_or_default().to_string();
+        if name == "file" {
+            let data = field.bytes().await.map_err(|e| {
+                ApiError::Validation(format!("Failed to read file: {}", e))
+            })?;
+
+            if data.len() > MAX_BINARY_SIZE {
+                return Err(ApiError::Validation(
+                    format!("File size exceeds {}MB limit", MAX_BINARY_SIZE / 1024 / 1024)
+                ));
+            }
+
+            file_data = Some(data.to_vec());
+        }
+    }
+
+    let file_data = file_data.ok_or_else(|| {
+        ApiError::Validation("No file uploaded".to_string())
+    })?;
+
+    // Validate it's an ELF binary
+    validate_elf_binary(&file_data)?;
+
+    // Create directory and save file
+    let dir_path = format!("/mnt/data/binaries/problems/{}", problem_id);
+    let file_path = format!("{}/generator", dir_path);
+
+    tokio::fs::create_dir_all(&dir_path).await.map_err(|e| {
+        ApiError::Internal(format!("Failed to create directory: {}", e))
+    })?;
+
+    tokio::fs::write(&file_path, &file_data).await.map_err(|e| {
+        ApiError::Internal(format!("Failed to save generator: {}", e))
+    })?;
+
+    // Make executable
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o755);
+        tokio::fs::set_permissions(&file_path, perms).await.map_err(|e| {
+            ApiError::Internal(format!("Failed to set permissions: {}", e))
+        })?;
+    }
+
+    // Update database with path
+    sqlx::query(
+        "UPDATE problems SET generator_path = $1, updated_at = NOW() WHERE id = $2"
+    )
+    .bind(&file_path)
+    .bind(problem_id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Failed to update problem: {}", e)))?;
+
+    tracing::info!(
+        problem_id = %problem_id,
+        user_id = %user.id,
+        file_size = file_data.len(),
+        "Generator binary uploaded"
+    );
+
+    Ok(Json(MessageResponse {
+        message: "Generator uploaded successfully".to_string(),
+    }))
+}
+
+/// POST /api/v1/problems/{id}/checker
+/// 
+/// Upload checker/verifier binary for a problem.
+/// The binary will be stored at /mnt/data/binaries/problems/{problem_id}/checker
+pub async fn upload_checker(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(problem_id): Path<Uuid>,
+    mut multipart: Multipart,
+) -> ApiResult<Json<MessageResponse>> {
+    // Check permission
+    check_problem_binary_permission(&state, problem_id, &user).await?;
+
+    // Process multipart upload
+    let mut file_data: Option<Vec<u8>> = None;
+
+    while let Some(field) = multipart.next_field().await.map_err(|e| {
+        ApiError::Validation(format!("Failed to read multipart: {}", e))
+    })? {
+        let name = field.name().unwrap_or_default().to_string();
+        if name == "file" {
+            let data = field.bytes().await.map_err(|e| {
+                ApiError::Validation(format!("Failed to read file: {}", e))
+            })?;
+
+            if data.len() > MAX_BINARY_SIZE {
+                return Err(ApiError::Validation(
+                    format!("File size exceeds {}MB limit", MAX_BINARY_SIZE / 1024 / 1024)
+                ));
+            }
+
+            file_data = Some(data.to_vec());
+        }
+    }
+
+    let file_data = file_data.ok_or_else(|| {
+        ApiError::Validation("No file uploaded".to_string())
+    })?;
+
+    // Validate it's an ELF binary
+    validate_elf_binary(&file_data)?;
+
+    // Create directory and save file
+    let dir_path = format!("/mnt/data/binaries/problems/{}", problem_id);
+    let file_path = format!("{}/checker", dir_path);
+
+    tokio::fs::create_dir_all(&dir_path).await.map_err(|e| {
+        ApiError::Internal(format!("Failed to create directory: {}", e))
+    })?;
+
+    tokio::fs::write(&file_path, &file_data).await.map_err(|e| {
+        ApiError::Internal(format!("Failed to save checker: {}", e))
+    })?;
+
+    // Make executable
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o755);
+        tokio::fs::set_permissions(&file_path, perms).await.map_err(|e| {
+            ApiError::Internal(format!("Failed to set permissions: {}", e))
+        })?;
+    }
+
+    // Update database with path
+    sqlx::query(
+        "UPDATE problems SET checker_path = $1, updated_at = NOW() WHERE id = $2"
+    )
+    .bind(&file_path)
+    .bind(problem_id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Failed to update problem: {}", e)))?;
+
+    tracing::info!(
+        problem_id = %problem_id,
+        user_id = %user.id,
+        file_size = file_data.len(),
+        "Checker binary uploaded"
+    );
+
+    Ok(Json(MessageResponse {
+        message: "Checker uploaded successfully".to_string(),
+    }))
+}
+
+/// GET /api/v1/problems/{id}/generator
+/// 
+/// Download generator binary for a problem.
+pub async fn download_generator(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(problem_id): Path<Uuid>,
+) -> ApiResult<axum::response::Response> {
+    use axum::body::Body;
+    use axum::response::IntoResponse;
+    
+    // Check permission
+    check_problem_binary_permission(&state, problem_id, &user).await?;
+
+    // Get file path from database
+    let path: Option<String> = sqlx::query_scalar(
+        "SELECT generator_path FROM problems WHERE id = $1"
+    )
+    .bind(problem_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?
+    .flatten();
+
+    let path = path.ok_or_else(|| {
+        ApiError::NotFound("Generator not uploaded for this problem".to_string())
+    })?;
+
+    // Read file
+    let data = tokio::fs::read(&path).await.map_err(|e| {
+        ApiError::Internal(format!("Failed to read generator: {}", e))
+    })?;
+
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "application/octet-stream"),
+         (axum::http::header::CONTENT_DISPOSITION, "attachment; filename=\"generator\"")],
+        Body::from(data)
+    ).into_response())
+}
+
+/// GET /api/v1/problems/{id}/checker
+/// 
+/// Download checker binary for a problem.
+pub async fn download_checker(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(problem_id): Path<Uuid>,
+) -> ApiResult<axum::response::Response> {
+    use axum::body::Body;
+    use axum::response::IntoResponse;
+    
+    // Check permission
+    check_problem_binary_permission(&state, problem_id, &user).await?;
+
+    // Get file path from database
+    let path: Option<String> = sqlx::query_scalar(
+        "SELECT checker_path FROM problems WHERE id = $1"
+    )
+    .bind(problem_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?
+    .flatten();
+
+    let path = path.ok_or_else(|| {
+        ApiError::NotFound("Checker not uploaded for this problem".to_string())
+    })?;
+
+    // Read file
+    let data = tokio::fs::read(&path).await.map_err(|e| {
+        ApiError::Internal(format!("Failed to read checker: {}", e))
+    })?;
+
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "application/octet-stream"),
+         (axum::http::header::CONTENT_DISPOSITION, "attachment; filename=\"checker\"")],
+        Body::from(data)
+    ).into_response())
+}
+
 /// Create routes for problems
 pub fn problem_routes() -> axum::Router<AppState> {
-    use axum::routing::{get, post};
+    use axum::routing::get;
 
     axum::Router::new()
         .route("/", get(list_problems))
@@ -718,10 +1073,14 @@ pub fn problem_routes() -> axum::Router<AppState> {
 }
 
 pub fn protected_problem_routes() -> axum::Router<AppState> {
-    use axum::routing::{delete, post, put};
+    use axum::routing::{delete, get, post, put};
 
     axum::Router::new()
         .route("/", post(create_problem))
         .route("/{id}", put(update_problem))
         .route("/{id}", delete(delete_problem))
+        .route("/{id}/generator", post(upload_generator))
+        .route("/{id}/generator", get(download_generator))
+        .route("/{id}/checker", post(upload_checker))
+        .route("/{id}/checker", get(download_checker))
 }

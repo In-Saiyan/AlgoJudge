@@ -20,6 +20,9 @@ CREATE TABLE IF NOT EXISTS contests (
     registration_required BOOLEAN NOT NULL DEFAULT true,
     max_participants INTEGER,  -- NULL means unlimited
     
+    -- Upload limits (configurable per contest)
+    max_submission_size_mb INTEGER DEFAULT 10 CHECK (max_submission_size_mb >= 1 AND max_submission_size_mb <= 100),
+    
     -- Allowed programming languages (NULL means all)
     allowed_languages TEXT[],
     

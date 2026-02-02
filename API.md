@@ -84,10 +84,16 @@ Base URL: `/api/v1`
 | Method | Endpoint | Description | Auth |
 |--------|----------|-------------|------|
 | GET | `/api/v1/problems` | List all problems | Yes |
-| POST | `/api/v1/problems` | Create new problem | Yes (Organizer/Admin) |
+| POST | `/api/v1/problems` | Create new problem (metadata only) | Yes (Organizer/Admin) |
 | GET | `/api/v1/problems/{id}` | Get problem by ID | Yes |
-| PUT | `/api/v1/problems/{id}` | Update problem | Yes (Owner/Admin) |
+| PUT | `/api/v1/problems/{id}` | Update problem metadata | Yes (Owner/Admin) |
 | DELETE | `/api/v1/problems/{id}` | Delete problem | Yes (Owner/Admin) |
+| POST | `/api/v1/problems/{id}/generator` | Upload generator binary (multipart) | Yes (Owner/Contest Owner/Collaborator†/Admin) |
+| POST | `/api/v1/problems/{id}/checker` | Upload checker/verifier binary (multipart) | Yes (Owner/Contest Owner/Collaborator†/Admin) |
+| GET | `/api/v1/problems/{id}/generator` | Download generator binary | Yes (Owner/Contest Owner/Collaborator†/Admin) |
+| GET | `/api/v1/problems/{id}/checker` | Download checker binary | Yes (Owner/Contest Owner/Collaborator†/Admin) |
+
+> † **Collaborator access**: Users who are collaborators (with `can_add_problems` permission) of any contest that contains this problem can access the generator/checker binaries.
 
 ### Test Cases (Legacy - for traditional judge)
 
@@ -106,10 +112,11 @@ Base URL: `/api/v1`
 |--------|----------|-------------|------|
 | GET | `/api/v1/submissions` | List submissions | Yes |
 | POST | `/api/v1/submissions` | Create submission (legacy source code) | Yes |
-| POST | `/api/v1/submissions/zip` | Create ZIP submission (algorithmic benchmark) | Yes |
+| POST | `/api/v1/submissions/upload` | Upload ZIP submission (multipart) | Yes |
 | GET | `/api/v1/submissions/{id}` | Get submission by ID | Yes (Owner/Admin) |
 | GET | `/api/v1/submissions/{id}/results` | Get submission test results | Yes (Owner/Admin) |
-| GET | `/api/v1/submissions/{id}/source` | Get submission source code | Yes (Owner/Admin) |
+| GET | `/api/v1/submissions/{id}/source` | Download submission source/ZIP | Yes (Owner/Admin) |
+| GET | `/api/v1/submissions/{id}/logs` | Get compilation/runtime logs | Yes (Owner/Admin) |
 
 ---
 
@@ -187,34 +194,102 @@ All API endpoints are rate limited. Responses include rate limit headers:
 
 ---
 
-## ZIP Submission Format
+## File Upload (Multipart)
 
-For algorithmic benchmarking submissions (`POST /api/v1/submissions/zip`):
+All file uploads use `multipart/form-data` format instead of base64 encoding for efficiency and streaming support.
 
-```json
-{
-  "problem_id": "uuid",
-  "contest_id": "uuid (optional)",
-  "runtime": "cpp|c|rust|go|python|zig",
-  "submission_zip_base64": "base64_encoded_zip",
-  "custom_generator_base64": "base64_encoded_binary (optional)",
-  "custom_generator_filename": "string (optional)"
-}
+### Submission Upload (`POST /api/v1/submissions/upload`)
+
+**Content-Type:** `multipart/form-data`
+
+**Query Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `contest_id` | UUID | Yes | Target contest ID |
+| `problem_id` | UUID | Yes | Target problem ID |
+
+**Form Fields:**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `file` | File | Yes | The submission ZIP file |
+
+**Size Limits:**
+- Default: 10MB
+- Per-contest configurable via `max_submission_size_mb` (1-100MB)
+
+**Example (curl):**
+```bash
+curl -X POST "https://api.algojudge.com/api/v1/submissions/upload?contest_id=...&problem_id=..." \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@submission.zip"
 ```
-
-### ZIP Contents (Required)
-
-```
-submission.zip
-├── compile.sh    # Compilation script
-└── run.sh        # Execution script
-```
-
-The compiled binary must be named after the problem code (e.g., `A`, `B`, `C`).
 
 ---
 
-## Problem Creation (Algorithmic Benchmarking)
+### Generator Upload (`POST /api/v1/problems/{id}/generator`)
+
+**Content-Type:** `multipart/form-data`
+
+**Form Fields:**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `file` | File | Yes | The generator binary (Linux ELF executable) |
+| `filename` | String | No | Custom filename (default: `generator`) |
+
+**Size Limits:** 50MB max
+
+**Example (curl):**
+```bash
+curl -X POST "https://api.algojudge.com/api/v1/problems/{id}/generator" \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@generator"
+```
+
+---
+
+### Checker Upload (`POST /api/v1/problems/{id}/checker`)
+
+**Content-Type:** `multipart/form-data`
+
+**Form Fields:**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `file` | File | Yes | The checker/verifier binary (Linux ELF executable) |
+| `filename` | String | No | Custom filename (default: `checker`) |
+
+**Size Limits:** 50MB max
+
+**Example (curl):**
+```bash
+curl -X POST "https://api.algojudge.com/api/v1/problems/{id}/checker" \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@checker"
+```
+
+---
+
+### ZIP Submission Contents (Required Structure)
+
+```
+submission.zip
+├── compile.sh    # Compilation script (required, executable)
+└── run.sh        # Execution script (required, executable)
+```
+
+**Validation Rules:**
+- Both `compile.sh` and `run.sh` must exist
+- No symlinks pointing outside the archive
+- No absolute paths
+- Total uncompressed size must be < 5x compressed size (zip bomb protection)
+- The compiled binary must be named after the problem code (e.g., `A`, `B`, `C`)
+
+Supported runtimes: `cpp`, `c`, `rust`, `go`, `python`, `zig`
+
+---
+
+## Problem Creation (Metadata Only)
+
+**POST `/api/v1/problems`** - Create problem metadata first, then upload binaries separately.
 
 ```json
 {
@@ -224,12 +299,46 @@ The compiled binary must be named after the problem code (e.g., `A`, `B`, `C`).
   "time_limit_ms": 60000,
   "memory_limit_kb": 524288,
   "num_test_cases": 5,
-  "allowed_runtimes": ["cpp", "rust", "go"],
-  "generator_base64": "base64_encoded_generator_binary",
-  "generator_filename": "generator",
-  "verifier_base64": "base64_encoded_verifier_binary", 
-  "verifier_filename": "checker"
+  "allowed_runtimes": ["cpp", "rust", "go"]
 }
+```
+
+**Response:**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "title": "Sort 4GB File",
+  "status": "draft",
+  "generator_uploaded": false,
+  "checker_uploaded": false,
+  "message": "Problem created. Upload generator and checker binaries to activate."
+}
+```
+
+**Workflow:**
+1. `POST /api/v1/problems` - Create metadata
+2. `POST /api/v1/problems/{id}/generator` - Upload generator binary
+3. `POST /api/v1/problems/{id}/checker` - Upload checker binary
+4. Problem status changes to `ready` when both binaries are uploaded
+
+---
+
+## Contest Upload Limits
+
+Contest organizers can configure per-contest upload limits:
+
+**PUT `/api/v1/contests/{id}`**
+
+```json
+{
+  "max_submission_size_mb": 25,
+  "allowed_languages": ["cpp", "rust", "go"]
+}
+```
+
+| Setting | Type | Default | Range | Description |
+|---------|------|---------|-------|-------------|
+| `max_submission_size_mb` | Integer | 10 | 1-100 | Max ZIP file size in MB |
 ```
 
 ---

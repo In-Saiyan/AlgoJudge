@@ -89,8 +89,12 @@ pub struct ProblemResponse {
     pub time_limit_ms: i32,
     pub memory_limit_kb: i32,
     pub num_test_cases: i32,
-    pub generator_path: Option<String>,
-    pub checker_path: Option<String>,
+    /// Status of problem: "draft" until both generator and checker are uploaded, then "ready"
+    pub status: String,
+    /// Whether generator binary has been uploaded
+    pub generator_uploaded: bool,
+    /// Whether checker binary has been uploaded
+    pub checker_uploaded: bool,
     pub max_score: i32,
     pub partial_scoring: bool,
     pub is_public: bool,
@@ -98,6 +102,9 @@ pub struct ProblemResponse {
     pub owner_id: Uuid,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Message with next steps for problem setup
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 /// Contest problem info (problem within a contest)

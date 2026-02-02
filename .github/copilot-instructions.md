@@ -813,52 +813,119 @@ Export these Prometheus metrics:
 - `judge_memory_usage_bytes` (Gauge)
 - `judge_verdict_total{type="AC|WA|TLE|RE"}` (Counter)
 
+## File Uploads
+
+All file uploads use `multipart/form-data` (NOT base64 encoding) for efficiency.
+
+### Submission Upload
+
+`POST /api/v1/submissions/upload?contest_id=...&problem_id=...`
+
+- Content-Type: `multipart/form-data`
+- Field: `file` (the ZIP submission)
+- Size limit: Contest-specific (1-100MB, default 10MB)
+
+### Problem Binaries
+
+Generator and checker binaries are uploaded separately after problem creation:
+
+1. `POST /api/v1/problems` - Create problem metadata (returns draft status)
+2. `POST /api/v1/problems/{id}/generator` - Upload generator binary
+3. `POST /api/v1/problems/{id}/checker` - Upload checker binary
+4. Problem status becomes "ready" when both are uploaded
+
+Binary uploads:
+- Content-Type: `multipart/form-data`
+- Field: `file` (Linux ELF executable)
+- Size limit: 50MB
+
 ## ZIP Submission Format
 
 User submissions must contain:
 ```
 submission.zip
-├── compile.sh    # Compilation script
-└── run.sh        # Execution script
+├── compile.sh    # Compilation script (required)
+└── run.sh        # Execution script (required)
 ```
+
+**Security validation:**
+- No symlinks pointing outside archive
+- No absolute paths
+- Total uncompressed size < 5x compressed size (zip bomb protection)
+- Both compile.sh and run.sh must exist
 
 Supported runtimes: `cpp`, `c`, `rust`, `go`, `python`, `zig`
 
 ## Problem Definition
 
 Problems require:
-- Generator binary (creates test cases)
-- Checker/Verifier binary (validates output)
+- Generator binary (uploaded via multipart, creates test cases)
+- Checker/Verifier binary (uploaded via multipart, validates output)
 - Problem code (A, B, C, etc.)
 - Time/memory limits
 - Number of test cases
 - Allowed runtimes
 
-## Security Considerations
+## Security & Isolation
 
-- Network disabled during compilation (Sisyphus)
-- cgroups for RAM/CPU limits (Minos)
-- namespaces for network isolation (Minos)
-- 30-second compilation timeout
-- File size limit: 10MB for submissions
+**ALL remote code execution is sandboxed** using nsjail/Docker with:
+
+### Sisyphus (Compilation)
+- Network: Completely disabled
+- Timeout: 30 seconds
+- Memory: 2GB limit
+- CPU: 2 cores
+- Disk: 500MB quota
+- seccomp: Blocks dangerous syscalls (ptrace, mount, etc.)
+
+### Minos (Execution)
+- Network: Completely disabled (no loopback)
+- Timeout: Per-problem time limit
+- Memory: Per-problem limit via cgroups
+- CPU: Single core
+- PID namespace: Isolated process tree
+- User namespace: Runs as unprivileged user
+- seccomp: Strict whitelist (read, write, mmap, brk, exit)
+- **No fork/clone/execve**: Prevents spawning processes
+
+### Generator/Checker (also sandboxed!)
+- Problem setter code is UNTRUSTED
+- Network: Disabled
+- Timeout: 60 seconds
+- Memory: 4GB limit
+- seccomp: Whitelist approach
 
 ## Testing Guidelines
 
 - Unit test all Specification implementations
 - Integration test the full submission flow
-- Mock RabbitMQ and storage for handler tests
+- Mock Redis and storage for handler tests
 - Use testcontainers for PostgreSQL tests
 
 ## Common Patterns
 
-### Handler Implementation
+### File Upload Handler
 
 ```rust
-pub async fn handler_name(
+pub async fn upload_file(
     State(app_state): State<AppState>,
-    Json(payload): Json<RequestDto>,
+    Extension(user): Extension<AuthUser>,
+    mut multipart: Multipart,
 ) -> Result<Json<ResponseDto>, AppError> {
-    // Implementation
+    let mut file_data: Option<Vec<u8>> = None;
+    
+    while let Some(field) = multipart.next_field().await? {
+        if field.name() == Some("file") {
+            let data = field.bytes().await?;
+            if data.len() > MAX_SIZE {
+                return Err(AppError::Validation("File too large".into()));
+            }
+            file_data = Some(data.to_vec());
+        }
+    }
+    
+    let data = file_data.ok_or(AppError::Validation("No file"))?;
+    // Process and save...
     Ok(Json(ResponseDto { ... }))
 }
 ```
@@ -870,13 +937,17 @@ pub async fn handler_name(
 pub struct CompileJob {
     pub submission_id: Uuid,
     pub file_path: String,
+    pub file_size: u64,
 }
 ```
 
 ## Do Not
 
+- Use base64 encoding for file uploads (use multipart/form-data)
 - Expose internal error details to API responses
 - Skip authentication middleware on protected endpoints
 - Store secrets in code (use environment variables)
 - Allow network access in sandboxed execution
+- Trust problem setter code (generators/checkers must be sandboxed)
 - Forget to clean up temp directories after execution
+- Allow fork/clone/execve in user submission sandbox

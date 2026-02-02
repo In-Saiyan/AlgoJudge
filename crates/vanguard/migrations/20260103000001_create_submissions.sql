@@ -18,8 +18,8 @@ CREATE TABLE IF NOT EXISTS submissions (
     source_code TEXT,
     
     -- For zip submissions
-    file_path VARCHAR(512),  -- /mnt/data/submissions/{contest_id}/{user_id}/{submission_id}.zip
-    file_size INTEGER,       -- Size in bytes
+    file_path VARCHAR(512),     -- /mnt/data/submissions/{contest_id}/{user_id}/{submission_id}.zip
+    file_size_bytes BIGINT,     -- Size in bytes (BIGINT for files up to 100MB+)
     
     -- Status tracking
     status VARCHAR(30) NOT NULL DEFAULT 'pending' CHECK (status IN (

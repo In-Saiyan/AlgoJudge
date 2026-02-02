@@ -62,6 +62,7 @@ pub async fn auth_middleware(
 /// Optional authentication middleware.
 /// 
 /// Extracts JWT if present but doesn't fail if missing.
+#[allow(dead_code)]
 pub async fn optional_auth_middleware(
     State(state): State<AppState>,
     mut request: Request,
@@ -96,8 +97,9 @@ pub async fn optional_auth_middleware(
 /// Admin-only middleware.
 /// 
 /// Requires the user to have admin role.
+#[allow(dead_code)]
 pub async fn admin_middleware(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     request: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
@@ -107,6 +109,27 @@ pub async fn admin_middleware(
         .ok_or(ApiError::Unauthorized)?;
 
     if auth_user.role != "admin" {
+        return Err(ApiError::Forbidden);
+    }
+
+    Ok(next.run(request).await)
+}
+
+/// Organizer or Admin middleware.
+/// 
+/// Requires the user to have admin or organizer role.
+#[allow(dead_code)]
+pub async fn organizer_middleware(
+    State(_state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Result<Response, ApiError> {
+    let auth_user = request
+        .extensions()
+        .get::<AuthUser>()
+        .ok_or(ApiError::Unauthorized)?;
+
+    if auth_user.role != "admin" && auth_user.role != "organizer" {
         return Err(ApiError::Forbidden);
     }
 

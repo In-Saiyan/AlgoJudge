@@ -12,7 +12,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 use crate::middleware::auth::AuthUser;
 
-use super::request::{CreateSubmissionRequest, LeaderboardQuery, ListSubmissionsQuery};
+use super::request::{CreateSubmissionRequest, LeaderboardQuery, ListSubmissionsQuery, ZipSubmissionParams};
 use super::response::*;
 
 /// POST /api/v1/submissions - Submit source code
@@ -253,7 +253,10 @@ pub async fn create_zip_submission(
         return Err(ApiError::NotFound("Problem not found in this contest".to_string()));
     }
 
-    // Process multipart form
+    // Get contest-specific upload size limit
+    let max_size = get_contest_upload_limit(&state.db, params.contest_id).await?;
+
+    // Process multipart form with streaming size validation
     let mut zip_data: Option<Vec<u8>> = None;
 
     while let Some(field) = multipart.next_field().await.map_err(|e| {
@@ -265,10 +268,14 @@ pub async fn create_zip_submission(
                 ApiError::Validation(format!("Failed to read file: {}", e))
             })?;
 
-            // 10MB limit
-            if data.len() > 10 * 1024 * 1024 {
+            // Contest-specific size limit (default 10MB, max 100MB)
+            if data.len() > max_size {
                 return Err(ApiError::Validation(
-                    "File size exceeds 10MB limit".to_string(),
+                    format!(
+                        "File size ({:.2}MB) exceeds contest limit ({:.2}MB)",
+                        data.len() as f64 / 1024.0 / 1024.0,
+                        max_size as f64 / 1024.0 / 1024.0
+                    )
                 ));
             }
 
@@ -280,12 +287,13 @@ pub async fn create_zip_submission(
         ApiError::Validation("No file uploaded".to_string())
     })?;
 
-    // Validate ZIP structure
+    // Validate ZIP structure (includes security checks)
     validate_zip_structure(&zip_data)?;
 
     // Create submission
     let submission_id = Uuid::new_v4();
     let submitted_at = Utc::now();
+    let file_size = zip_data.len() as i64;
 
     // Save ZIP to storage
     let storage_path = format!(
@@ -305,15 +313,15 @@ pub async fn create_zip_submission(
         ApiError::Internal(format!("Failed to save submission: {}", e))
     })?;
 
-    // Insert into database
+    // Insert into database (including file_size for tracking)
     sqlx::query(
         r#"
         INSERT INTO submissions (
             id, contest_id, problem_id, user_id,
-            submission_type, file_path,
+            submission_type, file_path, file_size_bytes,
             status, submitted_at
         )
-        VALUES ($1, $2, $3, $4, 'zip', $5, 'pending', $6)
+        VALUES ($1, $2, $3, $4, 'zip', $5, $6, 'pending', $7)
         "#,
     )
     .bind(submission_id)
@@ -321,6 +329,7 @@ pub async fn create_zip_submission(
     .bind(params.problem_id)
     .bind(user_id)
     .bind(&storage_path)
+    .bind(file_size)
     .bind(submitted_at)
     .execute(&state.db)
     .await?;
@@ -367,35 +376,92 @@ struct ContestCheckRowSimple {
     ends_at: chrono::DateTime<Utc>,
 }
 
-/// Query params for ZIP submission
-#[derive(Debug, serde::Deserialize)]
-pub struct ZipSubmissionParams {
-    pub contest_id: Uuid,
-    pub problem_id: Uuid,
+/// Default submission size limit in bytes (10MB)
+const DEFAULT_MAX_SUBMISSION_SIZE: usize = 10 * 1024 * 1024;
+
+/// Maximum allowed submission size in bytes (100MB)
+const MAX_ALLOWED_SUBMISSION_SIZE: usize = 100 * 1024 * 1024;
+
+/// Get contest-specific upload limit or return default
+async fn get_contest_upload_limit(
+    db: &sqlx::PgPool,
+    contest_id: Uuid,
+) -> Result<usize, ApiError> {
+    let limit: Option<i32> = sqlx::query_scalar(
+        "SELECT max_submission_size_mb FROM contests WHERE id = $1"
+    )
+    .bind(contest_id)
+    .fetch_optional(db)
+    .await?
+    .flatten();
+    
+    Ok(limit
+        .map(|mb| (mb as usize * 1024 * 1024).min(MAX_ALLOWED_SUBMISSION_SIZE))
+        .unwrap_or(DEFAULT_MAX_SUBMISSION_SIZE))
 }
 
-/// Validate ZIP structure (must contain compile.sh and run.sh)
+/// Validate ZIP structure with security checks
+/// - Must contain compile.sh and run.sh
+/// - No symlinks pointing outside archive
+/// - No absolute paths
+/// - Total uncompressed size < 5x compressed size (zip bomb protection)
 fn validate_zip_structure(data: &[u8]) -> Result<(), ApiError> {
     use std::io::Cursor;
     use zip::ZipArchive;
 
+    let compressed_size = data.len();
     let reader = Cursor::new(data);
-    let archive = ZipArchive::new(reader).map_err(|e| {
+    let mut archive = ZipArchive::new(reader).map_err(|e| {
         ApiError::Validation(format!("Invalid ZIP file: {}", e))
     })?;
 
     let mut has_compile = false;
     let mut has_run = false;
+    let mut total_uncompressed: u64 = 0;
+    let max_uncompressed = (compressed_size as u64) * 5; // Zip bomb protection
 
     for i in 0..archive.len() {
-        let name = archive.name_for_index(i).ok_or_else(|| {
-            ApiError::Validation("Failed to read ZIP entry name".to_string())
+        let file = archive.by_index(i).map_err(|e| {
+            ApiError::Validation(format!("Failed to read ZIP entry: {}", e))
         })?;
+        
+        let name = file.name();
+        
+        // Security: Check for path traversal
+        if name.contains("..") {
+            return Err(ApiError::Validation(
+                "ZIP contains path traversal (..): rejected for security".to_string(),
+            ));
+        }
+        
+        // Security: Check for absolute paths
+        if name.starts_with('/') {
+            return Err(ApiError::Validation(
+                "ZIP contains absolute path: rejected for security".to_string(),
+            ));
+        }
+        
+        // Security: Check for symlinks
+        if file.is_symlink() {
+            return Err(ApiError::Validation(
+                "ZIP contains symlinks: rejected for security".to_string(),
+            ));
+        }
+        
+        // Track uncompressed size for zip bomb detection
+        total_uncompressed += file.size();
+        if total_uncompressed > max_uncompressed {
+            return Err(ApiError::Validation(
+                "ZIP uncompressed size exceeds limit (potential zip bomb)".to_string(),
+            ));
+        }
 
-        if name == "compile.sh" || name == "./compile.sh" {
+        // Check for required files
+        let normalized = name.trim_start_matches("./");
+        if normalized == "compile.sh" {
             has_compile = true;
         }
-        if name == "run.sh" || name == "./run.sh" {
+        if normalized == "run.sh" {
             has_run = true;
         }
     }

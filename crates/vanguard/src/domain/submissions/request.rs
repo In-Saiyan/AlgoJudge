@@ -41,6 +41,14 @@ pub struct CreateSubmissionRequest {
     pub source_code: String,
 }
 
+/// ZIP submission upload query parameters
+/// Used with multipart/form-data file upload
+#[derive(Debug, Deserialize)]
+pub struct ZipSubmissionParams {
+    pub contest_id: Uuid,
+    pub problem_id: Uuid,
+}
+
 /// List submissions query parameters
 #[derive(Debug, Deserialize)]
 pub struct ListSubmissionsQuery {
