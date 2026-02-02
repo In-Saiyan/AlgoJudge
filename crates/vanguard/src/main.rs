@@ -212,10 +212,11 @@ fn create_router(state: AppState) -> Router {
         .expose_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
 
     // Main router
+    // Note: Layers are applied bottom-up, so CORS must be last to wrap everything
     Router::new()
         .nest("/health", health_routes)
         .nest("/api/v1", api_v1)
-        .layer(TraceLayer::new_for_http())
         .layer(cors)
+        .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

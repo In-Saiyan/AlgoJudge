@@ -12,7 +12,7 @@ axum = { version = "0.8.8", features = ["macros"] }
 chrono = { version = "0.4.43", features = ["serde"] }
 deadpool-redis = "0.18"
 dotenvy = "0.15"
-jsonwebtoken = "10.3.0"
+jsonwebtoken = { version = "10.3.0", features = ["aws_lc_rs"] }
 lazy_static = "1.5"
 olympus-common.workspace = true
 olympus-rules.workspace = true
