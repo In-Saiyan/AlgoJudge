@@ -242,21 +242,21 @@ This is an incremental implementation roadmap. Complete phases in order. Each ph
 **Goal:** Scheduled cleanup with configurable policies.
 
 #### 6.1 Project Setup
-- [ ] Initialize `horus` crate
-- [ ] Setup cron scheduler (tokio-cron-scheduler)
+- [x] Initialize `horus` crate
+- [x] Setup cron scheduler (tokio-cron-scheduler)
 
 #### 6.2 Cleanup Specifications (olympus-rules)
-- [ ] Create `LastAccessOlderThan(duration)` spec
-- [ ] Create `CreatedOlderThan(duration)` spec
-- [ ] Create `IsFile` / `IsDirectory` specs
-- [ ] Create `HasActiveSubmission` spec (DB lookup)
+- [x] Create `LastAccessOlderThan(duration)` spec
+- [x] Create `CreatedOlderThan(duration)` spec
+- [x] Create `IsFile` / `IsDirectory` specs
+- [x] Create `HasActiveSubmission` spec (DB lookup)
 
 #### 6.3 Policy Implementation
-- [ ] Implement directory scanner (walkdir)
-- [ ] Load cleanup policies from database/config
-- [ ] Stale testcase cleanup (>6 hours)
-- [ ] Orphan temp directory cleanup (>1 hour)
-- [ ] Log cleanup actions
+- [x] Implement directory scanner (walkdir)
+- [x] Load cleanup policies from database/config
+- [x] Stale testcase cleanup (>6 hours)
+- [x] Orphan temp directory cleanup (>1 hour)
+- [x] Log cleanup actions
 
 #### 6.4 Admin Configuration
 - [ ] Create `rule_configs` table migration

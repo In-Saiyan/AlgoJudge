@@ -1,6 +1,16 @@
 version: '3.8'
 
+x-common-env: &common-env
+  DATABASE_URL: postgres://olympus:olympus_dev@postgres:5432/olympus
+  REDIS_URL: redis://redis:6379
+  ENVIRONMENT: production
+  STORAGE_BASE_PATH: /mnt/data
+
 services:
+  # ==========================================================================
+  # Infrastructure Services
+  # ==========================================================================
+  
   postgres:
     image: postgres:16-alpine
     container_name: olympus-postgres
@@ -17,6 +27,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - olympus-network
 
   redis:
     image: redis:7-alpine
@@ -31,6 +43,111 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - olympus-network
+
+  # ==========================================================================
+  # Application Services
+  # ==========================================================================
+
+  vanguard:
+    build:
+      context: .
+      target: vanguard
+    container_name: olympus-vanguard
+    environment:
+      <<: *common-env
+      JWT_SECRET: ${JWT_SECRET:-super_secret_jwt_key_change_in_production}
+      HOST: 0.0.0.0
+      PORT: 8080
+    ports:
+      - "${API_PORT:-8080}:8080"
+    volumes:
+      - olympus_data:/mnt/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - olympus-network
+
+  sisyphus:
+    build:
+      context: .
+      target: sisyphus
+    container_name: olympus-sisyphus
+    environment:
+      <<: *common-env
+      WORKER_ID: sisyphus_1
+      CONSUMER_GROUP: sisyphus_group
+      STREAM_NAME: compile_queue
+      NETWORK_ENABLED: "false"
+      COMPILATION_TIMEOUT_SECS: 30
+    volumes:
+      - olympus_data:/mnt/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - olympus-network
+
+  minos:
+    build:
+      context: .
+      target: minos
+    container_name: olympus-minos
+    environment:
+      <<: *common-env
+      WORKER_ID: minos_1
+      CONSUMER_GROUP: minos_group
+      STREAM_NAME: run_queue
+      METRICS_PORT: 9091
+      DEFAULT_TIME_LIMIT_MS: 2000
+      DEFAULT_MEMORY_LIMIT_KB: 262144
+    ports:
+      - "${MINOS_METRICS_PORT:-9091}:9091"
+    volumes:
+      - olympus_data:/mnt/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - olympus-network
+
+  horus:
+    build:
+      context: .
+      target: horus
+    container_name: olympus-horus
+    environment:
+      <<: *common-env
+      TESTCASE_STALE_HOURS: 6
+      TEMP_ORPHAN_HOURS: 1
+      SUBMISSION_RETENTION_DAYS: 0
+    volumes:
+      - olympus_data:/mnt/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - olympus-network
+
+  # ==========================================================================
+  # Monitoring Services
+  # ==========================================================================
 
   prometheus:
     image: prom/prometheus:latest
@@ -44,6 +161,8 @@ services:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--web.enable-lifecycle'
+    networks:
+      - olympus-network
 
   grafana:
     image: grafana/grafana:latest
@@ -59,9 +178,16 @@ services:
       - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on:
       - prometheus
+    networks:
+      - olympus-network
+
+networks:
+  olympus-network:
+    driver: bridge
 
 volumes:
   postgres_data:
   redis_data:
   prometheus_data:
   grafana_data:
+  olympus_data:
