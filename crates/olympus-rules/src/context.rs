@@ -4,6 +4,10 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+#[cfg(feature = "auth")]
+use std::sync::Arc;
+#[cfg(feature = "auth")]
+use uuid::Uuid;
 
 /// Generic evaluation context that can hold arbitrary values.
 #[derive(Debug, Clone, Default)]
@@ -73,4 +77,84 @@ pub struct ExecutionContext {
     pub time_limit_ms: u64,
     pub memory_limit_kb: u64,
     pub output_matches: bool,
+}
+
+/// Authorization context for Vanguard access control.
+/// 
+/// This context carries user identity and database/cache access for
+/// evaluating authorization rules asynchronously.
+#[cfg(feature = "auth")]
+#[derive(Clone)]
+pub struct AuthContext {
+    /// Current user ID
+    pub user_id: Uuid,
+    /// Current user's role (admin, organizer, participant, spectator)
+    pub role: String,
+    /// Is the user currently banned?
+    pub is_banned: bool,
+    /// Database pool for async lookups (wrapped in Arc for Clone)
+    pub db: Arc<sqlx::PgPool>,
+    /// Redis pool for rate limiting checks (wrapped in Arc for Clone)
+    pub redis: Arc<deadpool_redis::Pool>,
+    /// Optional: Target contest ID for contest-scoped rules
+    pub contest_id: Option<Uuid>,
+    /// Optional: Target problem ID for problem-scoped rules
+    pub problem_id: Option<Uuid>,
+    /// Optional: Target submission ID for submission-scoped rules
+    pub submission_id: Option<Uuid>,
+}
+
+#[cfg(feature = "auth")]
+impl std::fmt::Debug for AuthContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthContext")
+            .field("user_id", &self.user_id)
+            .field("role", &self.role)
+            .field("is_banned", &self.is_banned)
+            .field("contest_id", &self.contest_id)
+            .field("problem_id", &self.problem_id)
+            .field("submission_id", &self.submission_id)
+            .finish()
+    }
+}
+
+#[cfg(feature = "auth")]
+impl AuthContext {
+    /// Create a new authorization context
+    pub fn new(
+        user_id: Uuid,
+        role: String,
+        is_banned: bool,
+        db: Arc<sqlx::PgPool>,
+        redis: Arc<deadpool_redis::Pool>,
+    ) -> Self {
+        Self {
+            user_id,
+            role,
+            is_banned,
+            db,
+            redis,
+            contest_id: None,
+            problem_id: None,
+            submission_id: None,
+        }
+    }
+
+    /// Set target contest for evaluation
+    pub fn with_contest(mut self, contest_id: Uuid) -> Self {
+        self.contest_id = Some(contest_id);
+        self
+    }
+
+    /// Set target problem for evaluation
+    pub fn with_problem(mut self, problem_id: Uuid) -> Self {
+        self.problem_id = Some(problem_id);
+        self
+    }
+
+    /// Set target submission for evaluation
+    pub fn with_submission(mut self, submission_id: Uuid) -> Self {
+        self.submission_id = Some(submission_id);
+        self
+    }
 }

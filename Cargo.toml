@@ -20,3 +20,4 @@ repository = "https://github.com/algojudge/olympus"
 # Internal crates
 olympus-common = { path = "crates/olympus-common" }
 olympus-rules = { path = "crates/olympus-rules" }
+olympus-rules-auth = { path = "crates/olympus-rules", features = ["auth"] }

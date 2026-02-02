@@ -15,7 +15,7 @@ dotenvy = "0.15"
 jsonwebtoken = { version = "10.3.0", features = ["aws_lc_rs"] }
 lazy_static = "1.5"
 olympus-common.workspace = true
-olympus-rules.workspace = true
+olympus-rules = { workspace = true, features = ["auth"] }
 redis = { version = "0.27", features = ["tokio-comp"] }
 regex = "1.11"
 serde = { version = "1.0.228", features = ["derive"] }

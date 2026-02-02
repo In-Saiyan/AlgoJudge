@@ -16,12 +16,19 @@
 //!     // Allow submission
 //! }
 //! ```
+//!
+//! # Features
+//!
+//! - `auth` - Enable authorization rules that require database/Redis access
 
 pub mod specification;
 pub mod operators;
 pub mod context;
 pub mod config;
 pub mod rules;
+
+#[cfg(feature = "auth")]
+pub mod auth_rules;
 
 /// Prelude module - import everything you need with `use olympus_rules::prelude::*`
 pub mod prelude {
@@ -32,4 +39,9 @@ pub mod prelude {
     pub use crate::context::{EvalContext, FileContext, ExecutionContext};
     pub use crate::config::{RuleConfig, NamedRuleConfig, CleanupPolicy, CleanupAction};
     pub use crate::rules::*;
+    
+    #[cfg(feature = "auth")]
+    pub use crate::context::AuthContext;
+    #[cfg(feature = "auth")]
+    pub use crate::auth_rules::*;
 }

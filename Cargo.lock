@@ -511,6 +511,16 @@ dependencies = [
 
 [[package]]
 name = "deadpool-redis"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c136f185b3ca9d1f4e4e19c11570e1002f4bfdd592d589053e225716d613851f"
+dependencies = [
+ "deadpool",
+ "redis 0.29.5",
+]
+
+[[package]]
+name = "deadpool-redis"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bb4d00bce7a9cfd07ded19530621a7df17c4c3b1c4e8fc2262471de404ce539a"
@@ -1528,9 +1538,14 @@ name = "olympus-rules"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "deadpool-redis 0.20.0",
+ "redis 0.29.5",
  "serde",
  "serde_json",
+ "sqlx",
  "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1818,6 +1833,28 @@ dependencies = [
  "combine",
  "futures-util",
  "itertools",
+ "itoa",
+ "num-bigint",
+ "percent-encoding",
+ "pin-project-lite",
+ "ryu",
+ "sha1_smol",
+ "socket2 0.5.10",
+ "tokio",
+ "tokio-util",
+ "url",
+]
+
+[[package]]
+name = "redis"
+version = "0.29.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bc42f3a12fd4408ce64d8efef67048a924e543bd35c6591c0447fda9054695f"
+dependencies = [
+ "arc-swap",
+ "bytes",
+ "combine",
+ "futures-util",
  "itoa",
  "num-bigint",
  "percent-encoding",

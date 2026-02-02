@@ -125,33 +125,35 @@ This is an incremental implementation roadmap. Complete phases in order. Each ph
 **Goal:** Submission handling with Redis Stream integration.
 
 #### 3.1 Database & Storage
-- [ ] `submissions` table migration
-- [ ] `submission_results` table migration
-- [ ] Create `/mnt/data/submissions/` directory structure
-- [ ] Implement file storage utilities
+- [x] `submissions` table migration
+- [x] `submission_results` table migration
+- [x] Create `/mnt/data/submissions/` directory structure
+- [x] Implement file storage utilities
+- [x] Add configurable upload limits per contest (1-100MB)
 
 #### 3.2 Submission Endpoints
-- [ ] Implement `POST /api/v1/submissions` (legacy source)
-- [ ] Implement `POST /api/v1/submissions/zip` (algorithmic benchmark)
-  - [ ] Validate ZIP structure (compile.sh, run.sh)
-  - [ ] Save to `/mnt/data/submissions/{contest_id}/{user_id}/{submission_id}.zip`
-  - [ ] Push to `compile_queue` Redis Stream
-- [ ] Implement `GET /api/v1/submissions`
-- [ ] Implement `GET /api/v1/submissions/{id}`
-- [ ] Implement `GET /api/v1/submissions/{id}/results`
-- [ ] Implement `GET /api/v1/submissions/{id}/source`
-- [ ] Implement `GET /api/v1/users/{id}/submissions`
+- [x] Implement `POST /api/v1/submissions` (legacy source)
+- [x] Implement `POST /api/v1/submissions/zip` (algorithmic benchmark)
+  - [x] Validate ZIP structure (compile.sh, run.sh)
+  - [x] Security: path traversal, symlinks, zip bomb protection
+  - [x] Save to `/mnt/data/submissions/{contest_id}/{user_id}/{submission_id}.zip`
+  - [x] Push to `compile_queue` Redis Stream
+- [x] Implement `GET /api/v1/submissions`
+- [x] Implement `GET /api/v1/submissions/{id}`
+- [x] Implement `GET /api/v1/submissions/{id}/results`
+- [x] Implement `GET /api/v1/submissions/{id}/source`
+- [x] Implement `GET /api/v1/users/{id}/submissions`
 
 #### 3.3 Submission Authorization Rules
-- [ ] Create `IsSubmissionOwner(submission_id)` spec
-- [ ] Create `CanSubmitToContest(contest_id)` composite rule
+- [ ] ⭐ Create `IsSubmissionOwner(submission_id)` spec
+- [ ] ⭐ Create `CanSubmitToContest(contest_id)` composite rule
   - [ ] `IsValidUser & ((!IsRateLimited & IsParticipant) | IsAdmin)`
-- [ ] Integrate into submission handlers
+- [ ] ⭐ Integrate rules into submission handlers
 
 #### 3.4 Leaderboard
-- [ ] Implement `GET /api/v1/contests/{id}/leaderboard`
-- [ ] Implement scoring logic (ICPC style or IOI style)
-- [ ] Add caching layer with Redis
+- [x] Implement `GET /api/v1/contests/{id}/leaderboard`
+- [x] Implement scoring logic (ICPC style)
+- [ ] ⭐ Add caching layer with Redis
 
 ---
 
