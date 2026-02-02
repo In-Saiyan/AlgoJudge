@@ -3,7 +3,7 @@ version: '3.8'
 x-common-env: &common-env
   DATABASE_URL: postgres://olympus:olympus_dev@postgres:5432/olympus
   REDIS_URL: redis://redis:6379
-  ENVIRONMENT: production
+  ENVIRONMENT: ${ENVIRONMENT:-production}
   STORAGE_BASE_PATH: /mnt/data
 
 services:
@@ -14,10 +14,12 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: olympus-postgres
+    env_file:
+      - .env
     environment:
-      POSTGRES_USER: olympus
-      POSTGRES_PASSWORD: olympus_dev
-      POSTGRES_DB: olympus
+      POSTGRES_USER: ${POSTGRES_USER:-olympus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-olympus_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-olympus}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -33,6 +35,8 @@ services:
   redis:
     image: redis:7-alpine
     container_name: olympus-redis
+    env_file:
+      - .env
     command: redis-server --appendonly yes
     ports:
       - "${REDIS_PORT:-6379}:6379"
@@ -55,6 +59,8 @@ services:
       context: .
       target: vanguard
     container_name: olympus-vanguard
+    env_file:
+      - .env
     environment:
       <<: *common-env
       JWT_SECRET: ${JWT_SECRET:-super_secret_jwt_key_change_in_production}
@@ -82,13 +88,15 @@ services:
       context: .
       target: sisyphus
     container_name: olympus-sisyphus
+    env_file:
+      - .env
     environment:
       <<: *common-env
-      WORKER_ID: sisyphus_1
+      WORKER_ID: ${SISYPHUS_WORKER_ID:-sisyphus_1}
       CONSUMER_GROUP: sisyphus_group
       STREAM_NAME: compile_queue
-      NETWORK_ENABLED: "false"
-      COMPILATION_TIMEOUT_SECS: 30
+      NETWORK_ENABLED: ${NETWORK_ENABLED:-false}
+      COMPILATION_TIMEOUT_SECS: ${COMPILATION_TIMEOUT_SECS:-30}
     volumes:
       - olympus_data:/mnt/data
       - /var/run/docker.sock:/var/run/docker.sock
@@ -105,14 +113,16 @@ services:
       context: .
       target: minos
     container_name: olympus-minos
+    env_file:
+      - .env
     environment:
       <<: *common-env
-      WORKER_ID: minos_1
+      WORKER_ID: ${MINOS_WORKER_ID:-minos_1}
       CONSUMER_GROUP: minos_group
       STREAM_NAME: run_queue
-      METRICS_PORT: 9091
-      DEFAULT_TIME_LIMIT_MS: 2000
-      DEFAULT_MEMORY_LIMIT_KB: 262144
+      METRICS_PORT: ${MINOS_METRICS_PORT:-9091}
+      DEFAULT_TIME_LIMIT_MS: ${DEFAULT_TIME_LIMIT_MS:-2000}
+      DEFAULT_MEMORY_LIMIT_KB: ${DEFAULT_MEMORY_LIMIT_KB:-262144}
     ports:
       - "${MINOS_METRICS_PORT:-9091}:9091"
     volumes:
@@ -130,11 +140,13 @@ services:
       context: .
       target: horus
     container_name: olympus-horus
+    env_file:
+      - .env
     environment:
       <<: *common-env
-      TESTCASE_STALE_HOURS: 6
-      TEMP_ORPHAN_HOURS: 1
-      SUBMISSION_RETENTION_DAYS: 0
+      TESTCASE_STALE_HOURS: ${TESTCASE_STALE_HOURS:-6}
+      TEMP_ORPHAN_HOURS: ${TEMP_ORPHAN_HOURS:-1}
+      SUBMISSION_RETENTION_DAYS: ${SUBMISSION_RETENTION_DAYS:-0}
     volumes:
       - olympus_data:/mnt/data
     depends_on:
