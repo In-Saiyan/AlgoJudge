@@ -6,25 +6,25 @@ This is an incremental implementation roadmap. Complete phases in order. Each ph
 
 ---
 
-### Phase 0: Project Setup
+### Phase 0: Project Setup ✅
 **Goal:** Initialize workspace structure and shared dependencies.
 
-- [ ] Create workspace `Cargo.toml` with all crate members
-- [ ] Create `crates/` directory structure
-- [ ] Initialize `olympus-common` crate
-  - [ ] Define `AppError` enum with error variants
-  - [ ] Define common types (`UserId`, `ContestId`, `SubmissionId`, etc.)
-  - [ ] Add shared utilities (UUID generation, timestamp helpers)
-- [ ] Initialize `olympus-rules` crate (Specification Pattern)
-  - [ ] Define `Specification<Ctx>` async trait
-  - [ ] Implement `And<A, B>`, `Or<A, B>`, `Not<A>` combinators
-  - [ ] Implement `BitAnd`, `BitOr`, `Not` operator overloading
-  - [ ] Add `RuleConfig` serde structs for JSON serialization
-  - [ ] Create `SpecRegistry` for dynamic rule building
-- [ ] Setup shared `docker-compose.yml` for local development
-  - [ ] PostgreSQL service
-  - [ ] Redis service
-  - [ ] Prometheus/Grafana services
+- [x] Create workspace `Cargo.toml` with all crate members
+- [x] Create `crates/` directory structure
+- [x] Initialize `olympus-common` crate
+  - [x] Define `AppError` enum with error variants
+  - [x] Define common types (`UserId`, `ContestId`, `SubmissionId`, etc.)
+  - [x] Add shared utilities (UUID generation, timestamp helpers)
+- [x] Initialize `olympus-rules` crate (Specification Pattern)
+  - [x] Define `Specification<Ctx>` async trait
+  - [x] Implement `And<A, B>`, `Or<A, B>`, `Not<A>` combinators
+  - [x] Implement `BitAnd`, `BitOr`, `Not` operator overloading
+  - [x] Add `RuleConfig` serde structs for JSON serialization
+  - [ ] ⭐ Create `SpecRegistry` for dynamic rule building
+- [x] Setup shared `docker-compose.yml` for local development
+  - [x] PostgreSQL service
+  - [x] Redis service
+  - [x] Prometheus/Grafana services
 
 ---
 
@@ -32,39 +32,39 @@ This is an incremental implementation roadmap. Complete phases in order. Each ph
 **Goal:** Basic API with auth, no queue integration yet.
 
 #### 1.1 Project Scaffolding
-- [ ] Initialize `vanguard` crate with Axum
-- [ ] Setup `config.rs` (env vars, database pool, Redis pool)
-- [ ] Create domain folder structure (`auth/`, `health/`)
-- [ ] Add `AppState` struct (db pool, redis pool)
+- [x] Initialize `vanguard` crate with Axum
+- [x] Setup `config.rs` (env vars, database pool, Redis pool)
+- [x] Create domain folder structure (`auth/`, `health/`)
+- [x] Add `AppState` struct (db pool, redis pool)
 
 #### 1.2 Health & Database
-- [ ] Implement `GET /health` endpoint
-- [ ] Setup SQLx with PostgreSQL
-- [ ] Create initial migrations
-  - [ ] `users` table
-  - [ ] `sessions` table (for refresh tokens)
-- [ ] Test database connectivity
+- [x] Implement `GET /health` endpoint
+- [x] Setup SQLx with PostgreSQL
+- [x] Create initial migrations
+  - [x] `users` table
+  - [x] `sessions` table (for refresh tokens)
+- [ ] ⭐ Test database connectivity
 
 #### 1.3 Authentication
-- [ ] Implement `POST /api/v1/auth/register`
-  - [ ] Password hashing (argon2)
-  - [ ] Email validation
-  - [ ] Username uniqueness check
-- [ ] Implement `POST /api/v1/auth/login`
-  - [ ] JWT token generation
-  - [ ] Refresh token storage in Redis
-- [ ] Implement `POST /api/v1/auth/refresh`
-- [ ] Implement `POST /api/v1/auth/logout`
-- [ ] Implement `GET /api/v1/auth/me`
-- [ ] Create `AuthMiddleware` (JWT verification)
+- [x] Implement `POST /api/v1/auth/register`
+  - [x] Password hashing (argon2)
+  - [x] Email validation
+  - [x] Username uniqueness check
+- [x] Implement `POST /api/v1/auth/login`
+  - [x] JWT token generation
+  - [x] Refresh token storage in Redis
+- [x] Implement `POST /api/v1/auth/refresh`
+- [x] Implement `POST /api/v1/auth/logout`
+- [x] Implement `GET /api/v1/auth/me`
+- [x] Create `AuthMiddleware` (JWT verification)
 
 #### 1.4 Rate Limiting Middleware
-- [ ] Implement `RateLimitMiddleware`
-  - [ ] Redis INCR + EXPIRE pattern
-  - [ ] Extract key from IP or user_id
-  - [ ] Add `X-RateLimit-*` response headers
-- [ ] Configure rate limit tiers in `config.rs`
-- [ ] Add `429 Too Many Requests` error response
+- [x] Implement `RateLimitMiddleware`
+  - [x] Redis INCR + EXPIRE pattern
+  - [x] Extract key from IP or user_id
+  - [x] Add `X-RateLimit-*` response headers
+- [x] Configure rate limit tiers in `config.rs`
+- [x] Add `429 Too Many Requests` error response
 
 #### 1.5 User Management
 - [ ] Implement `GET /api/v1/users`
