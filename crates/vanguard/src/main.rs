@@ -185,9 +185,21 @@ fn create_router(state: AppState) -> Router {
         .route("/{contest_id}/leaderboard", get(submissions::get_contest_leaderboard));
 
     // Submission routes (all protected)
-    let submission_routes = Router::new()
+    // Create routes with additional submission rate limit
+    let submission_create_routes = Router::new()
         .route("/", post(submissions::create_submission))
         .route("/zip", post(submissions::create_zip_submission))
+        .layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            submission_rate_limit_middleware,
+        ))
+        .layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ));
+
+    // Read-only submission routes (no submission rate limit)
+    let submission_read_routes = Router::new()
         .route("/", get(submissions::list_submissions))
         .route("/{id}", get(submissions::get_submission))
         .route("/{id}/results", get(submissions::get_submission_results))
@@ -196,6 +208,11 @@ fn create_router(state: AppState) -> Router {
             state.clone(),
             auth_middleware,
         ));
+
+    // Combine submission routes
+    let submission_routes = Router::new()
+        .merge(submission_create_routes)
+        .merge(submission_read_routes);
 
     // User submissions route
     let user_submissions_routes = Router::new()
