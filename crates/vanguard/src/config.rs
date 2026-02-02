@@ -33,7 +33,7 @@ impl Config {
         Self {
             host: env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
             port: env::var("PORT")
-                .unwrap_or_else(|_| "3000".to_string())
+                .unwrap_or_else(|_| "8081".to_string())
                 .parse()
                 .expect("PORT must be a number"),
             database_url: env::var("DATABASE_URL")
@@ -88,11 +88,11 @@ pub struct RateLimitConfig {
 impl Default for RateLimitConfig {
     fn default() -> Self {
         Self {
-            login_limit: 5,
+            login_limit: 30,
             login_window: 900,       // 15 minutes
-            register_limit: 3,
+            register_limit: 30,
             register_window: 3600,   // 1 hour
-            submission_limit: 10,
+            submission_limit: 5,
             submission_window: 60,   // 1 minute
             api_auth_limit: 100,
             api_auth_window: 60,     // 1 minute
