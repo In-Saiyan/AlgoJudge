@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/olympus-common",
+    "crates/olympus-rules",
+    "crates/vanguard",
+    "crates/sisyphus",
+    "crates/minos",
+    "crates/horus",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["AlgoJudge Team"]
+license = "MIT"
+repository = "https://github.com/algojudge/olympus"
+
+[workspace.dependencies]
+# Internal crates
+olympus-common = { path = "crates/olympus-common" }
+olympus-rules = { path = "crates/olympus-rules" }
