@@ -452,12 +452,13 @@ pub async fn list_submissions(
             s.language, s.status, s.score,
             s.max_time_ms, s.max_memory_kb, s.submitted_at,
             u.username, u.display_name,
-            p.title as problem_title, p.problem_code,
+            p.title as problem_title, cp.problem_code,
             c.title as contest_title
         FROM submissions s
         JOIN users u ON u.id = s.user_id
         JOIN problems p ON p.id = s.problem_id
         JOIN contests c ON c.id = s.contest_id
+        LEFT JOIN contest_problems cp ON cp.contest_id = s.contest_id AND cp.problem_id = s.problem_id
         ORDER BY s.submitted_at DESC
         LIMIT $1 OFFSET $2
         "#,
@@ -546,12 +547,13 @@ pub async fn get_submission(
             s.max_time_ms, s.max_memory_kb, s.compilation_log,
             s.submitted_at, s.compiled_at, s.judged_at,
             u.username, u.display_name,
-            p.title as problem_title, p.problem_code,
+            p.title as problem_title, cp.problem_code,
             c.title as contest_title
         FROM submissions s
         JOIN users u ON u.id = s.user_id
         JOIN problems p ON p.id = s.problem_id
         JOIN contests c ON c.id = s.contest_id
+        LEFT JOIN contest_problems cp ON cp.contest_id = s.contest_id AND cp.problem_id = s.problem_id
         WHERE s.id = $1
         "#,
     )
@@ -748,12 +750,13 @@ pub async fn get_user_submissions(
             s.language, s.status, s.score,
             s.max_time_ms, s.max_memory_kb, s.submitted_at,
             u.username, u.display_name,
-            p.title as problem_title, p.problem_code,
+            p.title as problem_title, cp.problem_code,
             c.title as contest_title
         FROM submissions s
         JOIN users u ON u.id = s.user_id
         JOIN problems p ON p.id = s.problem_id
         JOIN contests c ON c.id = s.contest_id
+        LEFT JOIN contest_problems cp ON cp.contest_id = s.contest_id AND cp.problem_id = s.problem_id
         WHERE s.user_id = $1
         ORDER BY s.submitted_at DESC
         LIMIT $2 OFFSET $3
@@ -834,7 +837,7 @@ pub async fn get_contest_leaderboard(
     // Get problems in contest
     let problems = sqlx::query_as::<_, ContestProblemRow>(
         r#"
-        SELECT p.id, p.title, p.problem_code, cp.points
+        SELECT p.id, p.title, cp.problem_code, cp.points
         FROM problems p
         JOIN contest_problems cp ON cp.problem_id = p.id
         WHERE cp.contest_id = $1
@@ -924,7 +927,7 @@ pub async fn get_contest_leaderboard(
         let problem_scores = sqlx::query_as::<_, ProblemScoreRow>(
             r#"
             SELECT 
-                p.problem_code,
+                cp.problem_code,
                 MAX(CASE WHEN s.status = 'accepted' THEN s.score ELSE 0 END) as score,
                 COUNT(s.id) as attempts,
                 BOOL_OR(s.status = 'accepted') as solved,
@@ -933,7 +936,7 @@ pub async fn get_contest_leaderboard(
             JOIN problems p ON p.id = cp.problem_id
             LEFT JOIN submissions s ON s.problem_id = p.id AND s.user_id = $1 AND s.contest_id = $2
             WHERE cp.contest_id = $2
-            GROUP BY p.id, p.problem_code, cp.order_index
+            GROUP BY p.id, cp.problem_code, cp.order_index
             ORDER BY cp.order_index
             "#,
         )
