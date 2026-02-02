@@ -8,9 +8,6 @@ mod error;
 mod middleware;
 mod state;
 
-#[cfg(test)]
-mod test_utils;
-
 use std::net::SocketAddr;
 
 use axum::{
