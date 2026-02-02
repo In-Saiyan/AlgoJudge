@@ -8,6 +8,7 @@ use chrono::Utc;
 use uuid::Uuid;
 use validator::Validate;
 
+use crate::domain::authorization::{build_contest_context, require_can_submit};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 use crate::middleware::auth::AuthUser;
@@ -60,32 +61,9 @@ pub async fn create_submission(
         }
     }
 
-    // Check user is participant
-    let is_participant: Option<bool> = sqlx::query_scalar::<_, Option<bool>>(
-        r#"SELECT EXISTS(SELECT 1 FROM contest_participants WHERE contest_id = $1 AND user_id = $2)"#,
-    )
-    .bind(payload.contest_id)
-    .bind(user_id)
-    .fetch_one(&state.db)
-    .await?;
-    let is_participant = is_participant.unwrap_or(false);
-
-    if !is_participant {
-        // Check if admin or collaborator
-        let is_admin = user.role == "admin";
-        let is_collaborator: Option<bool> = sqlx::query_scalar::<_, Option<bool>>(
-            r#"SELECT EXISTS(SELECT 1 FROM contest_collaborators WHERE contest_id = $1 AND user_id = $2)"#,
-        )
-        .bind(payload.contest_id)
-        .bind(user_id)
-        .fetch_one(&state.db)
-        .await?;
-        let is_collaborator = is_collaborator.unwrap_or(false);
-
-        if !is_admin && !is_collaborator {
-            return Err(ApiError::Forbidden);
-        }
-    }
+    // Check submission permission using authorization rules
+    let ctx = build_contest_context(&state, &user, payload.contest_id);
+    require_can_submit(&ctx).await?;
 
     // Check problem exists and is in contest
     let problem_in_contest: Option<bool> = sqlx::query_scalar::<_, Option<bool>>(
@@ -207,31 +185,9 @@ pub async fn create_zip_submission(
         return Err(ApiError::Validation("Contest has ended".to_string()));
     }
 
-    // Check user is participant
-    let is_participant: Option<bool> = sqlx::query_scalar::<_, Option<bool>>(
-        r#"SELECT EXISTS(SELECT 1 FROM contest_participants WHERE contest_id = $1 AND user_id = $2)"#,
-    )
-    .bind(params.contest_id)
-    .bind(user_id)
-    .fetch_one(&state.db)
-    .await?;
-    let is_participant = is_participant.unwrap_or(false);
-
-    if !is_participant {
-        let is_admin = user.role == "admin";
-        let is_collaborator: Option<bool> = sqlx::query_scalar::<_, Option<bool>>(
-            r#"SELECT EXISTS(SELECT 1 FROM contest_collaborators WHERE contest_id = $1 AND user_id = $2)"#,
-        )
-        .bind(params.contest_id)
-        .bind(user_id)
-        .fetch_one(&state.db)
-        .await?;
-        let is_collaborator = is_collaborator.unwrap_or(false);
-
-        if !is_admin && !is_collaborator {
-            return Err(ApiError::Forbidden);
-        }
-    }
+    // Check submission permission using authorization rules
+    let ctx = build_contest_context(&state, &user, params.contest_id);
+    require_can_submit(&ctx).await?;
 
     // Check problem exists and is in contest
     let problem_in_contest: Option<bool> = sqlx::query_scalar::<_, Option<bool>>(

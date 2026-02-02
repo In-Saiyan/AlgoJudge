@@ -10,6 +10,9 @@ use sqlx::FromRow;
 use uuid::Uuid;
 use validator::Validate;
 
+use crate::domain::authorization::{
+    build_contest_context, require_contest_modify_access, require_organizer,
+};
 use crate::error::{ApiError, ApiResult};
 use crate::middleware::auth::AuthUser;
 use crate::state::AppState;
@@ -273,10 +276,9 @@ pub async fn create_contest(
     // Validate request
     payload.validate().map_err(|e| ApiError::Validation(e.to_string()))?;
 
-    // Check user role (must be organizer or admin)
-    if user.role != "admin" && user.role != "organizer" {
-        return Err(ApiError::Forbidden);
-    }
+    // Check user role using authorization rules
+    let ctx = crate::domain::authorization::build_auth_context(&state, &user);
+    require_organizer(&ctx).await?;
 
     // Validate times
     if payload.end_time <= payload.start_time {
@@ -484,7 +486,7 @@ pub async fn update_contest(
 ) -> ApiResult<Json<ContestResponse>> {
     payload.validate().map_err(|e| ApiError::Validation(e.to_string()))?;
 
-    // Check contest exists and user has permission
+    // Check contest exists
     let contest: Option<ContestRow> = sqlx::query_as(
         "SELECT * FROM contests WHERE id = $1"
     )
@@ -495,26 +497,9 @@ pub async fn update_contest(
 
     let contest = contest.ok_or(ApiError::NotFound("Contest not found".to_string()))?;
 
-    // Check permission
-    let has_permission = if contest.owner_id == user.id || user.role == "admin" {
-        true
-    } else {
-        // Check collaborator permission
-        let collab: Option<(bool,)> = sqlx::query_as(
-            "SELECT can_edit_contest FROM contest_collaborators WHERE contest_id = $1 AND user_id = $2"
-        )
-            .bind(contest_id)
-            .bind(user.id)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
-
-        collab.map(|c| c.0).unwrap_or(false)
-    };
-
-    if !has_permission {
-        return Err(ApiError::Forbidden);
-    }
+    // Check permission using authorization rules
+    let ctx = build_contest_context(&state, &user, contest_id);
+    require_contest_modify_access(&ctx).await?;
 
     // Build update
     let title = payload.title.unwrap_or(contest.title);
@@ -603,11 +588,18 @@ pub async fn delete_contest(
         .await
         .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
-    let contest = contest.ok_or(ApiError::NotFound("Contest not found".to_string()))?;
+    let _contest = contest.ok_or(ApiError::NotFound("Contest not found".to_string()))?;
 
-    // Check permission
-    if contest.0 != user.id && user.role != "admin" {
-        return Err(ApiError::Forbidden);
+    // Check permission using authorization rules (must be owner or admin)
+    let ctx = build_contest_context(&state, &user, contest_id);
+    // Only owner or admin can delete
+    use crate::domain::authorization::require_contest_owner;
+    use olympus_rules::auth_rules::IsAdmin;
+    use olympus_rules::specification::Specification;
+    
+    let is_admin = IsAdmin.is_satisfied_by(&ctx).await;
+    if !is_admin {
+        require_contest_owner(&ctx).await?;
     }
 
     sqlx::query("DELETE FROM contests WHERE id = $1")

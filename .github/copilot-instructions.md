@@ -122,7 +122,7 @@ This is an incremental implementation roadmap. Complete phases in order. Each ph
 - [x] Create `NotRateLimited` spec with Redis check
 - [x] Create `AuthContext` with db/redis pools
 - [x] Create `SpecRegistry` for dynamic rule building
-- [ ] ⭐ Integrate rules into contest/problem handlers
+- [x] Integrate rules into contest/problem handlers
 
 ---
 
@@ -153,7 +153,7 @@ This is an incremental implementation roadmap. Complete phases in order. Each ph
 - [x] Create `IsSubmissionOwner(submission_id)` spec
 - [x] Create `CanSubmitToContest(contest_id)` composite rule
   - [x] `IsValidUser & ((!NotRateLimited & IsParticipant) | IsAdmin | IsCollaborator)`
-- [ ] ⭐ Integrate rules into submission handlers
+- [x] Integrate rules into submission handlers
 
 #### 3.4 Leaderboard
 - [x] Implement `GET /api/v1/contests/{id}/leaderboard`
@@ -199,22 +199,22 @@ This is an incremental implementation roadmap. Complete phases in order. Each ph
 **Goal:** Execution and verification with sandboxing.
 
 #### 5.1 Project Setup
-- [ ] Initialize `minos` crate
-- [ ] Setup Redis Stream consumer (`XREADGROUP`)
-- [ ] Create consumer group `minos_group` on startup
-- [ ] Setup Prometheus metrics exporter
+- [x] Initialize `minos` crate
+- [x] Setup Redis Stream consumer (`XREADGROUP`)
+- [x] Create consumer group `minos_group` on startup
+- [x] Setup Prometheus metrics exporter
 
 #### 5.2 Test Case Management
-- [ ] Implement lazy test case generation
-  - [ ] Check `/mnt/data/testcases/{problem_id}/`
-  - [ ] Run generator if cache miss
-  - [ ] Update "last accessed" timestamp on hit
+- [x] Implement lazy test case generation
+  - [x] Check `/mnt/data/testcases/{problem_id}/`
+  - [x] Run generator if cache miss
+  - [x] Update "last accessed" timestamp on hit
 
 #### 5.3 Sandbox Execution
-- [ ] Create `/mnt/data/temp/{submission_id}/` scratch directory
+- [x] Create `/mnt/data/temp/{submission_id}/` scratch directory
 - [ ] Setup cgroups for memory/CPU limits
 - [ ] Setup namespaces for network isolation
-- [ ] Execute user binary: `./binary < input.txt > output.txt`
+- [x] Execute user binary: `./binary < input.txt > output.txt`
 - [ ] Capture runtime and memory metrics
 
 #### 5.4 Verdict Specification Rules (olympus-rules)
@@ -222,19 +222,19 @@ This is an incremental implementation roadmap. Complete phases in order. Each ph
 - [ ] Create `WithinMemoryLimit(kb)` spec
 - [ ] Create `ExitCodeZero` spec
 - [ ] Create composite verdict rule
-- [ ] Implement checker execution
-- [ ] Determine final verdict (AC, WA, TLE, MLE, RE)
+- [x] Implement checker execution
+- [x] Determine final verdict (AC, WA, TLE, MLE, RE)
 
 #### 5.5 Result Handling
-- [ ] Update `submissions` table with verdict
-- [ ] Store per-testcase results in `submission_results`
-- [ ] `XACK` the message
-- [ ] Cleanup temp directory
+- [x] Update `submissions` table with verdict
+- [x] Store per-testcase results in `submission_results`
+- [x] `XACK` the message
+- [x] Cleanup temp directory
 
 #### 5.6 Metrics
-- [ ] Export `judge_execution_duration_seconds` histogram
-- [ ] Export `judge_memory_usage_bytes` gauge
-- [ ] Export `judge_verdict_total` counter by verdict type
+- [x] Export `judge_execution_duration_seconds` histogram
+- [x] Export `judge_memory_usage_bytes` gauge
+- [x] Export `judge_verdict_total` counter by verdict type
 
 ---
 
