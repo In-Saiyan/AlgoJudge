@@ -15,6 +15,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use axum::http::{header, Method};
 use tower_http::{
     cors::{Any, CorsLayer},
     trace::TraceLayer,
@@ -191,11 +192,24 @@ fn create_router(state: AppState) -> Router {
             api_rate_limit_middleware,
         ));
 
-    // CORS configuration
+    // CORS configuration - permissive for development
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+            Method::PATCH,
+        ])
+        .allow_headers([
+            header::CONTENT_TYPE,
+            header::AUTHORIZATION,
+            header::ACCEPT,
+            header::ORIGIN,
+        ])
+        .expose_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
 
     // Main router
     Router::new()
