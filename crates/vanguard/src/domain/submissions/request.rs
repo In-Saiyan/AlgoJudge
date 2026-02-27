@@ -56,6 +56,10 @@ pub struct ZipSubmissionParams {
     /// Optional contest scope. `None` = standalone submission.
     pub contest_id: Option<Uuid>,
     pub problem_id: Uuid,
+    /// Optional language hint so Sisyphus can set up the correct compiler
+    /// toolchain before running compile.sh. If omitted, Sisyphus relies
+    /// entirely on compile.sh to handle compilation.
+    pub language: Option<Language>,
 }
 
 /// List submissions query parameters

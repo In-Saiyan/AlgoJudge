@@ -128,7 +128,17 @@ impl JobConsumer {
                     }
                 }
                 Err(e) => {
-                    tracing::error!("Error processing job: {}", e);
+                    let err_msg = e.to_string();
+                    tracing::error!("Error processing job: {}", err_msg);
+
+                    // If Redis lost the consumer group, re-create it
+                    if err_msg.contains("NOGROUP") {
+                        tracing::warn!("Consumer group missing, re-initializing...");
+                        if let Err(init_err) = self.initialize().await {
+                            tracing::error!("Failed to re-initialize consumer group: {}", init_err);
+                        }
+                    }
+
                     // Brief pause on error to avoid tight loop
                     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 }

@@ -217,6 +217,7 @@ All file uploads use `multipart/form-data` format instead of base64 encoding for
 |-----------|------|----------|-------------|
 | `contest_id` | UUID | No | Target contest ID (omit for standalone/practice submission) |
 | `problem_id` | UUID | Yes | Target problem ID |
+| `language` | String | No | Language hint (`cpp`, `c`, `rust`, `go`, `python`, `zig`). Helps Sisyphus set up the correct compiler toolchain before running `compile.sh`. If omitted, Sisyphus relies entirely on `compile.sh`. |
 
 **Form Fields:**
 | Field | Type | Required | Description |
@@ -237,12 +238,12 @@ All file uploads use `multipart/form-data` format instead of base64 encoding for
 
 **Example (curl):**
 ```bash
-# Contest submission
-curl -X POST "https://api.algojudge.com/api/v1/submissions/upload?contest_id=...&problem_id=..." \
+# Contest submission with language hint
+curl -X POST "https://api.algojudge.com/api/v1/submissions/upload?contest_id=...&problem_id=...&language=cpp" \
   -H "Authorization: Bearer <token>" \
   -F "file=@submission.zip"
 
-# Standalone submission (no contest)
+# Standalone submission (no contest, no language hint — relies on compile.sh)
 curl -X POST "https://api.algojudge.com/api/v1/submissions/upload?problem_id=..." \
   -H "Authorization: Bearer <token>" \
   -F "file=@submission.zip"

@@ -95,7 +95,7 @@ services:
       <<: *common-env
       WORKER_ID: ${SISYPHUS_WORKER_ID:-sisyphus_1}
       CONSUMER_GROUP: sisyphus_group
-      STREAM_NAME: compile_queue
+      COMPILE_STREAM: compile_queue
       NETWORK_ENABLED: ${NETWORK_ENABLED:-false}
       COMPILATION_TIMEOUT_SECS: ${COMPILATION_TIMEOUT_SECS:-30}
     volumes:

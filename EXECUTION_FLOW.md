@@ -67,12 +67,17 @@ g++ -O2 -std=c++17 -o solution main.cpp
 ```json
 {
   "submission_id": "abc-123",
+  "type": "zip",
   "file_path": "/mnt/data/submissions/.../abc-123.zip",
-  "language": "cpp"
+  "language": "cpp"          // optional — helps Sisyphus set up the right toolchain
 }
 ```
 
 **Queue:** `compile_queue`
+
+> **Note:** The `language` field is optional for ZIP submissions. When present,
+> Sisyphus can pre-configure the correct compiler toolchain. When absent,
+> Sisyphus relies solely on the user-provided `compile.sh`.
 
 ---
 
@@ -83,7 +88,7 @@ g++ -O2 -std=c++17 -o solution main.cpp
 2. Creates temporary build directory
 3. Extracts ZIP to temp directory
 4. Spawns SANDBOXED Docker container
-5. Runs `compile.sh` inside container
+5. Runs `compile.sh` inside container (optionally with language-specific toolchain)
 6. Extracts compiled binary
 7. Queues to `run_queue` or marks `COMPILATION_ERROR`
 
@@ -694,3 +699,13 @@ This ensures no submission is silently lost when binaries are uploaded out of or
 └─────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
+---
+
+## Consumer Group Resilience
+
+Both Sisyphus and Minos create their Redis consumer groups at startup via
+`XGROUP CREATE ... MKSTREAM`. If the group is lost after startup (e.g. Redis
+restart without persistence, manual `XGROUP DESTROY`, etc.), the consumers
+detect the `NOGROUP` error inside their processing loops and automatically
+re-create the consumer group before retrying — no manual intervention or
+service restart is required.

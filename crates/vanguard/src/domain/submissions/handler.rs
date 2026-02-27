@@ -293,6 +293,7 @@ pub async fn create_zip_submission(
     let submission_id = Uuid::new_v4();
     let submitted_at = Utc::now();
     let file_size = zip_data.len() as i64;
+    let lang_str = params.language.as_ref().map(|l| l.to_string());
 
     // Save ZIP to storage – use "standalone" bucket when no contest
     let storage_path = if let Some(contest_id) = params.contest_id {
@@ -321,16 +322,17 @@ pub async fn create_zip_submission(
         r#"
         INSERT INTO submissions (
             id, contest_id, problem_id, user_id,
-            submission_type, file_path, file_size_bytes,
+            submission_type, language, file_path, file_size_bytes,
             status, submitted_at
         )
-        VALUES ($1, $2, $3, $4, 'zip', $5, $6, 'pending', $7)
+        VALUES ($1, $2, $3, $4, 'zip', $5, $6, $7, 'pending', $8)
         "#,
     )
     .bind(submission_id)
     .bind(params.contest_id) // NULL for standalone
     .bind(params.problem_id)
     .bind(user_id)
+    .bind(&lang_str)
     .bind(&storage_path)
     .bind(file_size)
     .bind(submitted_at)
@@ -339,22 +341,27 @@ pub async fn create_zip_submission(
 
     let mut conn = state.redis.get().await?;
 
-    let stream_id: String = redis::cmd("XADD")
-        .arg("compile_queue")
+    let mut xadd = redis::cmd("XADD");
+    xadd.arg("compile_queue")
         .arg("*")
         .arg("submission_id")
         .arg(submission_id.to_string())
         .arg("type")
         .arg("zip")
         .arg("file_path")
-        .arg(&storage_path)
-        .query_async(&mut *conn)
-        .await?;
+        .arg(&storage_path);
+
+    if let Some(ref lang) = lang_str {
+        xadd.arg("language").arg(lang);
+    }
+
+    let stream_id: String = xadd.query_async(&mut *conn).await?;
 
     tracing::info!(
         submission_id = %submission_id,
         stream_id = %stream_id,
         contest_id = ?params.contest_id,
+        language = ?lang_str,
         "ZIP submission queued for compilation"
     );
 
@@ -363,7 +370,7 @@ pub async fn create_zip_submission(
         contest_id: params.contest_id,
         problem_id: params.problem_id,
         submission_type: "zip".to_string(),
-        language: None,
+        language: lang_str,
         status: "pending".to_string(),
         submitted_at,
         message: "Submission queued for compilation".to_string(),

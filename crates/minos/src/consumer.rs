@@ -100,8 +100,18 @@ impl JudgeConsumer {
             self.config.consumer_group
         );
 
-        // First, claim any pending messages that may have been abandoned
-        self.claim_pending_messages().await?;
+        // First, claim any pending messages that may have been abandoned.
+        // Tolerate NOGROUP here — the group will be re-created on first NOGROUP
+        // inside the loop.
+        if let Err(e) = self.claim_pending_messages().await {
+            let msg = e.to_string();
+            if msg.contains("NOGROUP") {
+                tracing::warn!("Consumer group not found during pending-claim, re-initializing...");
+                self.initialize().await?;
+            } else {
+                return Err(e);
+            }
+        }
 
         while !self.shutdown.load(Ordering::SeqCst) {
             match self.process_next_job().await {
@@ -112,7 +122,17 @@ impl JudgeConsumer {
                     // No job available, will retry after block timeout
                 }
                 Err(e) => {
-                    tracing::error!("Error processing job: {}", e);
+                    let err_msg = e.to_string();
+                    tracing::error!("Error processing job: {}", err_msg);
+
+                    // If Redis lost the consumer group, re-create it
+                    if err_msg.contains("NOGROUP") {
+                        tracing::warn!("Consumer group missing, re-initializing...");
+                        if let Err(init_err) = self.initialize().await {
+                            tracing::error!("Failed to re-initialize consumer group: {}", init_err);
+                        }
+                    }
+
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             }
