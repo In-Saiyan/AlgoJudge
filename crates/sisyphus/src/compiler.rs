@@ -1,16 +1,18 @@
 //! Compilation logic for Sisyphus.
 //!
-//! Handles extracting submissions, running compile scripts,
-//! and saving compiled binaries.
+//! Both ZIP and source-code submissions are compiled inside ephemeral
+//! Docker containers.  The language (when known) selects the image so
+//! the right toolchain is available.  For ZIP submissions the user's
+//! `compile.sh` is executed; for legacy source submissions we generate
+//! the appropriate compiler invocation automatically.
 
 use anyhow::{anyhow, Context, Result};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use tokio::fs;
-use tokio::process::Command;
 
 use crate::config::Config;
 use crate::consumer::CompileJob;
+use crate::container::{ensure_image, resolve_image, run_in_container};
 
 /// Compiler handles the compilation of submissions.
 pub struct Compiler {
@@ -32,7 +34,7 @@ impl Compiler {
         }
     }
 
-    /// Compile a ZIP submission.
+    /// Compile a ZIP submission inside a language-specific Docker container.
     async fn compile_zip(&self, job: &CompileJob) -> Result<String> {
         let file_path = job.file_path.as_ref()
             .ok_or_else(|| anyhow!("ZIP submission missing file_path"))?;
@@ -51,13 +53,36 @@ impl Compiler {
         // Extract ZIP to build directory
         self.extract_zip(file_path, build_dir).await?;
 
-        // Run compile.sh
-        let compile_output = self.run_compile_script(build_dir).await?;
+        // Resolve the container image from the language hint
+        let spec = resolve_image(&self.config, job.language.as_deref());
 
-        if !compile_output.success {
+        // Ensure the image exists locally (pull if needed)
+        ensure_image(&spec.image).await?;
+
+        // Make compile.sh executable before mounting
+        let compile_script = build_dir.join("compile.sh");
+        if !compile_script.exists() {
+            return Err(anyhow!("compile.sh not found in submission"));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&compile_script, std::fs::Permissions::from_mode(0o755)).await?;
+        }
+
+        // Run compile.sh inside the container
+        let output = run_in_container(
+            &self.config,
+            &spec,
+            build_dir,
+            &["sh", "-c", "./compile.sh"],
+        )
+        .await?;
+
+        if !output.success {
             return Err(anyhow!(
                 "Compilation failed:\n{}",
-                compile_output.stderr
+                output.stderr
             ));
         }
 
@@ -67,7 +92,7 @@ impl Compiler {
         Ok(binary_path)
     }
 
-    /// Compile a source code submission (legacy single-file).
+    /// Compile a source code submission inside a language-specific Docker container.
     async fn compile_source(&self, job: &CompileJob) -> Result<String> {
         let language = job.language.as_ref()
             .ok_or_else(|| anyhow!("Source submission missing language"))?;
@@ -80,12 +105,24 @@ impl Compiler {
             .context("Failed to create temp directory")?;
         let build_dir = temp_dir.path();
 
-        // Write source file
+        // Write source file and determine compile command
         let (source_file, compile_cmd) = self.get_compile_command(language, build_dir)?;
         fs::write(build_dir.join(&source_file), &source_code).await?;
 
-        // Run compilation command
-        let output = self.run_command(&compile_cmd, build_dir).await?;
+        // Resolve the container image
+        let spec = resolve_image(&self.config, Some(language));
+        ensure_image(&spec.image).await?;
+
+        // Build a single shell string so we can run it as `sh -c "..."`
+        let shell_cmd = compile_cmd.join(" ");
+
+        let output = run_in_container(
+            &self.config,
+            &spec,
+            build_dir,
+            &["sh", "-c", &shell_cmd],
+        )
+        .await?;
 
         if !output.success {
             return Err(anyhow!(
@@ -143,63 +180,6 @@ impl Compiler {
         .await??;
 
         Ok(())
-    }
-
-    /// Run the compile.sh script in the build directory.
-    async fn run_compile_script(&self, build_dir: &Path) -> Result<CommandOutput> {
-        let compile_script = build_dir.join("compile.sh");
-
-        if !compile_script.exists() {
-            return Err(anyhow!("compile.sh not found in submission"));
-        }
-
-        // Make script executable
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let perms = std::fs::Permissions::from_mode(0o755);
-            fs::set_permissions(&compile_script, perms).await?;
-        }
-
-        self.run_command(&["./compile.sh"], build_dir).await
-    }
-
-    /// Run a command in the build directory with timeout.
-    async fn run_command(&self, cmd: &[&str], cwd: &Path) -> Result<CommandOutput> {
-        let (program, args) = cmd.split_first()
-            .ok_or_else(|| anyhow!("Empty command"))?;
-
-        let child = Command::new(program)
-            .args(args.iter())
-            .current_dir(cwd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .with_context(|| format!("Failed to spawn {}", program))?;
-
-        // Apply timeout
-        let timeout = tokio::time::Duration::from_secs(self.config.compile_timeout_secs);
-        let result = tokio::time::timeout(timeout, child.wait_with_output()).await;
-
-        match result {
-            Ok(Ok(output)) => {
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-                Ok(CommandOutput {
-                    success: output.status.success(),
-                    exit_code: output.status.code(),
-                    stdout,
-                    stderr,
-                })
-            }
-            Ok(Err(e)) => Err(anyhow!("Command execution failed: {}", e)),
-            Err(_) => Err(anyhow!(
-                "Compilation timed out after {} seconds",
-                self.config.compile_timeout_secs
-            )),
-        }
     }
 
     /// Get the source file name and compile command for a language.
@@ -331,15 +311,6 @@ impl Compiler {
             submission_id
         ))
     }
-}
-
-/// Output from a command execution.
-#[derive(Debug)]
-struct CommandOutput {
-    success: bool,
-    exit_code: Option<i32>,
-    stdout: String,
-    stderr: String,
 }
 
 #[cfg(test)]

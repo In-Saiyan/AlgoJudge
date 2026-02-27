@@ -6,6 +6,7 @@
 mod compiler;
 mod config;
 mod consumer;
+mod container;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;

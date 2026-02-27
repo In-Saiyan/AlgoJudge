@@ -2,6 +2,23 @@
 
 use std::env;
 
+/// Per-language Docker image overrides.
+///
+/// Each field can be set via the corresponding env var
+/// (e.g. `CONTAINER_IMAGE_CPP=gcc:14`).  When unset the
+/// container module falls back to sensible defaults.
+#[derive(Debug, Clone, Default)]
+pub struct ContainerImages {
+    pub cpp: Option<String>,
+    pub c: Option<String>,
+    pub rust: Option<String>,
+    pub go: Option<String>,
+    pub python: Option<String>,
+    pub zig: Option<String>,
+    /// Fallback image when the language is unknown or not specified.
+    pub generic: Option<String>,
+}
+
 /// Sisyphus configuration
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -31,6 +48,8 @@ pub struct Config {
     pub max_memory_bytes: u64,
     /// Maximum CPU cores for compilation
     pub max_cpu_cores: u32,
+    /// Per-language Docker image overrides
+    pub container_images: ContainerImages,
 }
 
 impl Config {
@@ -69,6 +88,15 @@ impl Config {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(2),
+            container_images: ContainerImages {
+                cpp: env::var("CONTAINER_IMAGE_CPP").ok(),
+                c: env::var("CONTAINER_IMAGE_C").ok(),
+                rust: env::var("CONTAINER_IMAGE_RUST").ok(),
+                go: env::var("CONTAINER_IMAGE_GO").ok(),
+                python: env::var("CONTAINER_IMAGE_PYTHON").ok(),
+                zig: env::var("CONTAINER_IMAGE_ZIG").ok(),
+                generic: env::var("CONTAINER_IMAGE_GENERIC").ok(),
+            },
         }
     }
 }

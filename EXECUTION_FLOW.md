@@ -87,15 +87,33 @@ g++ -O2 -std=c++17 -o solution main.cpp
 1. Consumes job from `compile_queue` (XREADGROUP)
 2. Creates temporary build directory
 3. Extracts ZIP to temp directory
-4. Spawns SANDBOXED Docker container
-5. Runs `compile.sh` inside container (optionally with language-specific toolchain)
-6. Extracts compiled binary
-7. Queues to `run_queue` or marks `COMPILATION_ERROR`
+4. Resolves a **language-specific Docker image** from the `language` hint
+5. Spawns an isolated container from that image
+6. Runs `compile.sh` (or the auto-generated compile command for source submissions)
+7. Extracts compiled binary from the build directory
+8. Queues to `run_queue` or marks `COMPILATION_ERROR`
+
+### Language → Docker Image Mapping
+
+Each language resolves to a dedicated image so the right toolchain is
+always available.  Images are pulled lazily on first use and cached
+afterwards.  Defaults can be overridden via `CONTAINER_IMAGE_*` env
+vars.
+
+| Language | Default Image | Override Env Var |
+|----------|---------------|------------------|
+| `cpp` / `c++` | `gcc:14` | `CONTAINER_IMAGE_CPP` |
+| `c` | `gcc:14` | `CONTAINER_IMAGE_C` |
+| `rust` | `rust:1.85-bookworm` | `CONTAINER_IMAGE_RUST` |
+| `go` | `golang:1.23-bookworm` | `CONTAINER_IMAGE_GO` |
+| `python` | `python:3.12-bookworm` | `CONTAINER_IMAGE_PYTHON` |
+| `zig` | `euantorano/zig:0.13.0` | `CONTAINER_IMAGE_ZIG` |
+| *(unknown/omitted)* | `ubuntu:24.04` | `CONTAINER_IMAGE_GENERIC` |
 
 ### Build Directory Structure
 
 ```
-/mnt/data/temp/build_{submission_id}/
+/tmp/.tmp<random>/          # tempfile::tempdir on Sisyphus host
 ├── compile.sh
 ├── run.sh
 ├── main.cpp
@@ -104,37 +122,32 @@ g++ -O2 -std=c++17 -o solution main.cpp
 
 ### Docker Container Configuration
 
-```
-Image: olympus-compiler:latest
-Contains: g++, clang, rustc, go, python3, zig
-```
-
-**Sandbox Settings:**
+**Sandbox Settings (applied to every compilation container):**
 ```
 --rm                              # Remove after exit
---network=none                    # NO network access
---memory=2g                       # 2GB RAM limit
---cpus=2                          # 2 CPU cores
---pids-limit=100                  # Limit process spawning
+--network=none                    # NO network access (unless NETWORK_ENABLED)
+--memory=2g                       # Memory limit (MAX_MEMORY_BYTES)
+--cpus=2                          # CPU cores  (MAX_CPU_CORES)
+--pids-limit=256                  # Limit process spawning
 --read-only                       # Read-only root filesystem
---security-opt=no-new-privileges
+--tmpfs /tmp:rw,noexec,nosuid     # Writable /tmp for compilers
 --cap-drop=ALL                    # Drop all capabilities
 ```
 
 **Volume Mounts:**
 | Host | Container | Mode |
 |------|-----------|------|
-| `/mnt/data/temp/build_{id}/` | `/build` | rw |
-| `/tmp/compile_{id}/` | `/tmp` | rw |
+| `<temp build directory>` | `/workspace` | rw |
 
 **Execution (inside container):**
 ```bash
-$ cd /build
+$ cd /workspace
 $ chmod +x compile.sh
 $ timeout 30s ./compile.sh
 
-# compile.sh runs: g++ -O2 -std=c++17 -o solution main.cpp
-# Output: /build/solution (compiled binary)
+# For a cpp submission the container is gcc:14, so g++ is available:
+#   compile.sh runs: g++ -O2 -std=c++17 -o solution main.cpp
+#   Output: /workspace/solution (compiled binary)
 ```
 
 ### Output
@@ -156,7 +169,7 @@ $ timeout 30s ./compile.sh
 
 **Queue:** `run_queue`
 
-**Cleanup:** `rm -rf /mnt/data/temp/build_{submission_id}/`
+**Cleanup:** Build directory is a `tempfile::tempdir` and is dropped automatically when Sisyphus finishes processing the job.
 
 ---
 
@@ -315,7 +328,7 @@ Runs on cron schedules to clean up stale/orphaned files.
 |------|---------|-----------|
 | `/mnt/data/submissions/{contest}/{user}/{id}.zip` | Contest ZIP upload | Permanent (until archived) |
 | `/mnt/data/submissions/standalone/{user}/{id}.zip` | Standalone ZIP upload | Permanent (until archived) |
-| `/mnt/data/temp/build_{id}/` | Compilation workspace | Deleted after compile |
+| `/tmp/.tmp<random>/` | Compilation workspace (temp dir) | Deleted after compile |
 | `/mnt/data/binaries/users/{id}_bin` | Compiled user binary | Deleted by Horus (24h+) |
 | `/mnt/data/binaries/problems/{id}/generator` | Test generator | Permanent |
 | `/mnt/data/binaries/problems/{id}/checker` | Output checker | Permanent |
@@ -461,7 +474,7 @@ This ensures no submission is silently lost when binaries are uploaded out of or
 │   7. Queues to run_queue or marks COMPILATION_ERROR                                      │
 │                                                                                          │
 │   ┌─────────────────────────────────────────────────────────────────────────┐           │
-│   │  Host: /mnt/data/temp/build_{submission_id}/                            │           │
+│   │  Host: /tmp/.tmp<random>/  (tempfile build directory)                   │           │
 │   │  ├── compile.sh                                                         │           │
 │   │  ├── run.sh                                                             │           │
 │   │  ├── main.cpp                                                           │           │
@@ -470,10 +483,11 @@ This ensures no submission is silently lost when binaries are uploaded out of or
 │                         │                                                                │
 │                         ▼                                                                │
 │   ┌─────────────────────────────────────────────────────────────────────────────────┐   │
-│   │                     DOCKER CONTAINER (Sandboxed)                                │   │
+│   │              DOCKER CONTAINER (Language-Specific, Sandboxed)                     │   │
 │   │  ┌─────────────────────────────────────────────────────────────────────────┐   │   │
-│   │  │  Image: olympus-compiler:latest                                         │   │   │
-│   │  │  Contains: g++, clang, rustc, go, python3, zig                          │   │   │
+│   │  │  Image resolved from language hint:                                     │   │   │
+│   │  │    cpp → gcc:14 │ rust → rust:1.85 │ go → golang:1.23 │ ...            │   │   │
+│   │  │  Pulled lazily and cached locally                                       │   │   │
 │   │  └─────────────────────────────────────────────────────────────────────────┘   │   │
 │   │                                                                                 │   │
 │   │  Sandbox Settings:                                                              │   │
@@ -482,27 +496,26 @@ This ensures no submission is silently lost when binaries are uploaded out of or
 │   │  │  --network=none          # NO network access                            │   │   │
 │   │  │  --memory=2g             # 2GB RAM limit                                │   │   │
 │   │  │  --cpus=2                # 2 CPU cores                                  │   │   │
-│   │  │  --pids-limit=100        # Limit process spawning                       │   │   │
+│   │  │  --pids-limit=256        # Limit process spawning                       │   │   │
 │   │  │  --read-only             # Read-only root filesystem                    │   │   │
-│   │  │  --security-opt=no-new-privileges                                       │   │   │
+│   │  │  --tmpfs /tmp            # Writable /tmp for compilers                  │   │   │
 │   │  │  --cap-drop=ALL          # Drop all capabilities                        │   │   │
 │   │  └─────────────────────────────────────────────────────────────────────────┘   │   │
 │   │                                                                                 │   │
 │   │  Volume Mounts:                                                                 │   │
 │   │  ┌─────────────────────────────────────────────────────────────────────────┐   │   │
 │   │  │  Host                              Container                            │   │   │
-│   │  │  /mnt/data/temp/build_{id}/   →   /build:rw    (writable)              │   │   │
-│   │  │  /tmp/compile_{id}/           →   /tmp:rw      (temp space)            │   │   │
+│   │  │  <temp build dir>             →   /workspace:rw (writable)              │   │   │
 │   │  └─────────────────────────────────────────────────────────────────────────┘   │   │
 │   │                                                                                 │   │
 │   │  Execution (inside container):                                                  │   │
 │   │  ┌─────────────────────────────────────────────────────────────────────────┐   │   │
-│   │  │  $ cd /build                                                            │   │   │
+│   │  │  $ cd /workspace                                                        │   │   │
 │   │  │  $ chmod +x compile.sh                                                  │   │   │
 │   │  │  $ timeout 30s ./compile.sh                                             │   │   │
 │   │  │                                                                         │   │   │
-│   │  │  # compile.sh runs: g++ -O2 -std=c++17 -o solution main.cpp            │   │   │
-│   │  │  # Output: /build/solution (compiled binary)                            │   │   │
+│   │  │  # e.g. compile.sh runs: g++ -O2 -std=c++17 -o solution main.cpp       │   │   │
+│   │  │  # Output: /workspace/solution (compiled binary)                        │   │   │
 │   │  └─────────────────────────────────────────────────────────────────────────┘   │   │
 │   └─────────────────────────────────────────────────────────────────────────────────┘   │
 │                         │                                                                │
@@ -523,7 +536,7 @@ This ensures no submission is silently lost when binaries are uploaded out of or
 │   │  }                                                                      │           │
 │   └─────────────────────────────────────────────────────────────────────────┘           │
 │                                                                                          │
-│   Cleanup: rm -rf /mnt/data/temp/build_{submission_id}/                                 │
+│   Cleanup: temp build directory removed automatically (tempfile::tempdir)                │
 └─────────────────────────────────────────────────────────────────────────────────────────┘
                                            │
                                            ▼
