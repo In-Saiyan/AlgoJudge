@@ -20,7 +20,7 @@ use crate::verdict::SubmissionResult;
 pub struct JudgeJob {
     pub submission_id: Uuid,
     pub problem_id: Uuid,
-    pub contest_id: Uuid,
+    pub contest_id: Option<Uuid>,
     pub time_limit_ms: u64,
     pub memory_limit_kb: u64,
     pub num_testcases: i32,
@@ -215,6 +215,16 @@ impl JudgeConsumer {
                     submission_result.total_count
                 );
             }
+            Err(e) if e.to_string() == "QUEUE_PENDING" => {
+                // Binaries not ready — submission marked as queue_pending.
+                // ACK the message without retry or dead-letter.
+                self.ack_message(&message_id).await?;
+
+                tracing::info!(
+                    "Submission {} deferred (queue_pending) — binaries not ready",
+                    job.submission_id,
+                );
+            }
             Err(e) => {
                 tracing::error!("Failed to judge submission {}: {}", job.submission_id, e);
                 JOBS_FAILED.inc();
@@ -284,8 +294,7 @@ impl JudgeConsumer {
                 .parse()?,
             contest_id: field_map
                 .get("contest_id")
-                .ok_or_else(|| anyhow!("Missing contest_id"))?
-                .parse()?,
+                .and_then(|v| v.parse().ok()),
             time_limit_ms: field_map
                 .get("time_limit_ms")
                 .and_then(|v| v.parse().ok())
@@ -309,6 +318,28 @@ impl JudgeConsumer {
 
     /// Judge a submission
     async fn judge_submission(&self, job: &JudgeJob) -> Result<SubmissionResult> {
+        // Check if generator and checker binaries exist for this problem.
+        // If either is missing, the problem is not yet ready for judging.
+        // Mark submission as "queue_pending" and return without error.
+        if !self.problem_binaries_ready(job.problem_id).await {
+            tracing::info!(
+                submission_id = %job.submission_id,
+                problem_id = %job.problem_id,
+                "Problem binaries (generator/checker) not ready — setting queue_pending"
+            );
+
+            sqlx::query(
+                "UPDATE submissions SET status = 'queue_pending' WHERE id = $1",
+            )
+            .bind(job.submission_id)
+            .execute(&self.db_pool)
+            .await?;
+
+            // Return a sentinel result so the caller knows to ACK without recording
+            // test-case results.
+            return Err(anyhow!("QUEUE_PENDING"));
+        }
+
         // Update status to JUDGING
         sqlx::query(
             "UPDATE submissions SET status = 'JUDGING', judged_at = NOW() WHERE id = $1",
@@ -430,7 +461,7 @@ impl JudgeConsumer {
             .arg("problem_id")
             .arg(job.problem_id.to_string())
             .arg("contest_id")
-            .arg(job.contest_id.to_string())
+            .arg(job.contest_id.map(|id| id.to_string()).unwrap_or_default())
             .arg("time_limit_ms")
             .arg(job.time_limit_ms.to_string())
             .arg("memory_limit_kb")
@@ -464,7 +495,7 @@ impl JudgeConsumer {
             .arg("problem_id")
             .arg(job.problem_id.to_string())
             .arg("contest_id")
-            .arg(job.contest_id.to_string())
+            .arg(job.contest_id.map(|id| id.to_string()).unwrap_or_default())
             .arg("error")
             .arg(error)
             .arg("retry_count")
@@ -491,5 +522,19 @@ impl JudgeConsumer {
         .await?;
 
         Ok(())
+    }
+
+    /// Check whether both generator and checker binaries exist for a problem.
+    async fn problem_binaries_ready(&self, problem_id: Uuid) -> bool {
+        let base = self
+            .executor
+            .storage_config()
+            .problem_binaries_path
+            .join(problem_id.to_string());
+
+        let generator_exists = base.join("generator").exists();
+        let checker_exists = base.join("checker").exists();
+
+        generator_exists && checker_exists
     }
 }

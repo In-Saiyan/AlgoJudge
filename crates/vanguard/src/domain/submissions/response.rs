@@ -33,7 +33,8 @@ pub struct SubmissionSummary {
     pub id: Uuid,
     pub user: UserInfo,
     pub problem: ProblemInfo,
-    pub contest: ContestInfo,
+    /// `None` for standalone (practice) submissions.
+    pub contest: Option<ContestInfo>,
     pub language: Option<String>,
     pub status: String,
     pub score: Option<i32>,
@@ -64,7 +65,8 @@ pub struct SubmissionDetailResponse {
     pub id: Uuid,
     pub user: UserInfo,
     pub problem: ProblemInfo,
-    pub contest: ContestInfo,
+    /// `None` for standalone (practice) submissions.
+    pub contest: Option<ContestInfo>,
     pub submission_type: String,
     pub language: Option<String>,
     pub status: String,
@@ -84,7 +86,8 @@ pub struct SubmissionDetailResponse {
 #[derive(Debug, Serialize)]
 pub struct SubmissionResponse {
     pub id: Uuid,
-    pub contest_id: Uuid,
+    /// `None` for standalone (practice) submissions.
+    pub contest_id: Option<Uuid>,
     pub problem_id: Uuid,
     pub submission_type: String,
     pub language: Option<String>,

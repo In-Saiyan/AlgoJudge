@@ -22,8 +22,8 @@ pub struct ExecutionContext {
     pub submission_id: Uuid,
     /// Problem ID
     pub problem_id: Uuid,
-    /// Contest ID
-    pub contest_id: Uuid,
+    /// Contest ID (None for standalone submissions)
+    pub contest_id: Option<Uuid>,
     /// Time limit in milliseconds
     pub time_limit_ms: u64,
     /// Memory limit in KB
@@ -48,6 +48,11 @@ impl Executor {
             execution,
             testcase_manager,
         }
+    }
+
+    /// Expose the storage config for binary path lookups.
+    pub fn storage_config(&self) -> &StorageConfig {
+        &self.storage
     }
 
     /// Execute a submission against all test cases

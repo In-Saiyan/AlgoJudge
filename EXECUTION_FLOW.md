@@ -46,15 +46,21 @@ g++ -O2 -std=c++17 -o solution main.cpp
 ## Phase 1: Vanguard (API Gateway)
 
 **Actions:**
-1. Receives multipart upload
-2. Validates ZIP structure (compile.sh, run.sh exist)
-3. Security checks (no symlinks, path traversal, zip bombs)
-4. Saves to persistent storage
-5. Queues compilation job to Redis Stream
+1. Receives multipart upload (or source code JSON)
+2. If `contest_id` is provided: validates contest is active, user is a participant/collaborator/admin, and problem is assigned to that contest
+3. If `contest_id` is omitted (standalone submission): validates problem exists and user is authenticated
+4. Validates ZIP structure (compile.sh, run.sh exist)
+5. Security checks (no symlinks, path traversal, zip bombs)
+6. Saves to persistent storage
+7. Queues compilation job to Redis Stream
 
 **File Storage:**
 ```
+# Contest submission
 /mnt/data/submissions/{contest_id}/{user_id}/{submission_id}.zip
+
+# Standalone (practice) submission — no contest_id
+/mnt/data/submissions/standalone/{user_id}/{submission_id}.zip
 ```
 
 **Redis Stream Message:**
@@ -153,10 +159,13 @@ $ timeout 30s ./compile.sh
 
 **Actions:**
 1. Consumes job from `run_queue` (XREADGROUP)
-2. Loads compiled binary from storage
-3. Gets/generates test cases (lazy generation)
-4. For each test case: spawn sandboxed container, run binary, check output
-5. Updates verdict in database
+2. **Checks if generator and checker binaries exist** for the problem
+   - If either is missing → sets submission status to `queue_pending`, ACKs the message, and moves on (no retry/dead-letter)
+   - The submission will be automatically re-queued when the missing binary is uploaded via `POST /api/v1/problems/{id}/generator` or `/checker`
+3. Loads compiled binary from storage
+4. Gets/generates test cases (lazy generation)
+5. For each test case: spawn sandboxed container, run binary, check output
+6. Updates verdict in database
 
 ### Test Case Generation (if not cached)
 
@@ -299,13 +308,49 @@ Runs on cron schedules to clean up stale/orphaned files.
 
 | Path | Purpose | Lifecycle |
 |------|---------|-----------|
-| `/mnt/data/submissions/{contest}/{user}/{id}.zip` | Original ZIP upload | Permanent (until archived) |
+| `/mnt/data/submissions/{contest}/{user}/{id}.zip` | Contest ZIP upload | Permanent (until archived) |
+| `/mnt/data/submissions/standalone/{user}/{id}.zip` | Standalone ZIP upload | Permanent (until archived) |
 | `/mnt/data/temp/build_{id}/` | Compilation workspace | Deleted after compile |
 | `/mnt/data/binaries/users/{id}_bin` | Compiled user binary | Deleted by Horus (24h+) |
 | `/mnt/data/binaries/problems/{id}/generator` | Test generator | Permanent |
 | `/mnt/data/binaries/problems/{id}/checker` | Output checker | Permanent |
 | `/mnt/data/testcases/{problem_id}/` | Generated test inputs | Cached, cleaned after 6h |
 | `/mnt/data/temp/{id}/` | Execution scratch space | Deleted after judging |
+
+---
+
+## Queue Pending Flow
+
+When a submission's problem does not yet have both generator and checker binaries,
+the submission enters the `queue_pending` state instead of failing outright.
+
+```
+┌────────────┐   compiles ok   ┌────────────┐   binaries missing   ┌──────────────┐
+│  PENDING   │ ───────────────▶│  COMPILED   │ ────────────────────▶│ QUEUE_PENDING│
+└────────────┘                 └────────────┘                       └──────┬───────┘
+                                                                          │
+                                      ┌───────────────────────────────────┘
+                                      │  binary upload triggers re-queue
+                                      ▼
+                               ┌────────────┐                       ┌──────────────┐
+                               │  JUDGING   │ ─────────────────────▶│   JUDGED     │
+                               └────────────┘                       └──────────────┘
+```
+
+1. **Vanguard** accepts the submission (contest or standalone) and queues it on `compile_queue`.
+2. **Sisyphus** compiles it and pushes to `run_queue`.
+3. **Minos** picks up the job. Before running test cases it checks whether
+   `/mnt/data/binaries/problems/{problem_id}/generator` and `checker` exist.
+   - **Both exist** → proceeds normally (JUDGING → verdict).
+   - **Either missing** → sets status to `queue_pending`, ACKs the message, no
+     retry/dead-letter.
+4. When a problem setter later uploads the missing binary via
+   `POST /api/v1/problems/{id}/generator` or `/checker`, Vanguard checks whether
+   both binaries now exist. If so it:
+   - Queries all submissions with `status = 'queue_pending'` for that problem.
+   - Re-queues each on `run_queue` and resets its status to `compiled`.
+
+This ensures no submission is silently lost when binaries are uploaded out of order.
 
 ---
 

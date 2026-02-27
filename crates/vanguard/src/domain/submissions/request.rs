@@ -30,9 +30,14 @@ impl std::fmt::Display for Language {
 }
 
 /// Create submission request (legacy source code)
+///
+/// If `contest_id` is provided, the problem must be in that contest and
+/// the user must be a participant/collaborator/admin. If omitted, this is
+/// a standalone (practice) submission — only the problem is validated.
 #[derive(Debug, Deserialize, Validate)]
 pub struct CreateSubmissionRequest {
-    pub contest_id: Uuid,
+    /// Optional contest scope. `None` = standalone submission.
+    pub contest_id: Option<Uuid>,
     pub problem_id: Uuid,
     
     pub language: Language,
@@ -43,9 +48,13 @@ pub struct CreateSubmissionRequest {
 
 /// ZIP submission upload query parameters
 /// Used with multipart/form-data file upload
+///
+/// If `contest_id` is provided, contest validation applies.
+/// If omitted, this is a standalone (practice) submission.
 #[derive(Debug, Deserialize)]
 pub struct ZipSubmissionParams {
-    pub contest_id: Uuid,
+    /// Optional contest scope. `None` = standalone submission.
+    pub contest_id: Option<Uuid>,
     pub problem_id: Uuid,
 }
 

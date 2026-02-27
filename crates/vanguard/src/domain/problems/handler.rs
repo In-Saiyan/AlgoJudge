@@ -6,6 +6,7 @@ use axum::{
     Json,
 };
 use chrono::{DateTime, Utc};
+use deadpool_redis::redis;
 use sqlx::FromRow;
 use uuid::Uuid;
 use validator::Validate;
@@ -811,6 +812,116 @@ async fn check_problem_binary_permission(
     Err(ApiError::Forbidden)
 }
 
+/// When both generator and checker binaries exist for a problem,
+/// find all submissions in `queue_pending` status for that problem
+/// and re-queue them on the `run_queue` Redis Stream for judging.
+async fn requeue_pending_submissions(
+    state: &AppState,
+    problem_id: Uuid,
+) -> ApiResult<u64> {
+    // Check if both binaries now exist
+    let dir_path = format!("/mnt/data/binaries/problems/{}", problem_id);
+    let generator_exists = tokio::fs::metadata(format!("{}/generator", dir_path)).await.is_ok();
+    let checker_exists = tokio::fs::metadata(format!("{}/checker", dir_path)).await.is_ok();
+
+    if !generator_exists || !checker_exists {
+        return Ok(0);
+    }
+
+    // Fetch problem limits for the run_queue message
+    let problem = sqlx::query_as::<_, ProblemLimitsRow>(
+        r#"
+        SELECT id, time_limit_ms, memory_limit_kb, num_test_cases
+        FROM problems WHERE id = $1
+        "#,
+    )
+    .bind(problem_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| ApiError::NotFound("Problem not found".to_string()))?;
+
+    // Find queue_pending submissions
+    let pending_submissions = sqlx::query_as::<_, PendingSubmissionRow>(
+        r#"
+        SELECT s.id as submission_id, s.contest_id
+        FROM submissions s
+        WHERE s.problem_id = $1 AND s.status = 'queue_pending'
+        "#,
+    )
+    .bind(problem_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    if pending_submissions.is_empty() {
+        return Ok(0);
+    }
+
+    let mut conn = state.redis.get().await?;
+    let mut requeued: u64 = 0;
+
+    for sub in &pending_submissions {
+        // Look up the user binary path
+        let binary_path = format!(
+            "/mnt/data/binaries/users/{}_bin",
+            sub.submission_id
+        );
+
+        // Push to run_queue
+        let _: String = redis::cmd("XADD")
+            .arg("run_queue")
+            .arg("*")
+            .arg("submission_id")
+            .arg(sub.submission_id.to_string())
+            .arg("problem_id")
+            .arg(problem_id.to_string())
+            .arg("contest_id")
+            .arg(sub.contest_id.map(|id| id.to_string()).unwrap_or_default())
+            .arg("time_limit_ms")
+            .arg(problem.time_limit_ms.to_string())
+            .arg("memory_limit_kb")
+            .arg(problem.memory_limit_kb.to_string())
+            .arg("num_testcases")
+            .arg(problem.num_test_cases.to_string())
+            .arg("binary_path")
+            .arg(&binary_path)
+            .query_async(&mut *conn)
+            .await?;
+
+        // Update status back to compiled
+        sqlx::query(
+            "UPDATE submissions SET status = 'compiled' WHERE id = $1"
+        )
+        .bind(sub.submission_id)
+        .execute(&state.db)
+        .await?;
+
+        requeued += 1;
+    }
+
+    tracing::info!(
+        problem_id = %problem_id,
+        requeued = requeued,
+        "Re-queued pending submissions after binary upload"
+    );
+
+    Ok(requeued)
+}
+
+#[derive(Debug, FromRow)]
+struct ProblemLimitsRow {
+    #[allow(dead_code)]
+    id: Uuid,
+    time_limit_ms: i32,
+    memory_limit_kb: i32,
+    num_test_cases: i32,
+}
+
+#[derive(Debug, FromRow)]
+struct PendingSubmissionRow {
+    submission_id: Uuid,
+    contest_id: Option<Uuid>,
+}
+
 /// POST /api/v1/problems/{id}/generator
 /// 
 /// Upload generator binary for a problem.
@@ -892,8 +1003,17 @@ pub async fn upload_generator(
         "Generator binary uploaded"
     );
 
+    // Re-queue any queue_pending submissions now that binaries may be ready
+    let requeued = requeue_pending_submissions(&state, problem_id).await?;
+
+    let msg = if requeued > 0 {
+        format!("Generator uploaded successfully. {} pending submission(s) re-queued for judging.", requeued)
+    } else {
+        "Generator uploaded successfully".to_string()
+    };
+
     Ok(Json(MessageResponse {
-        message: "Generator uploaded successfully".to_string(),
+        message: msg,
     }))
 }
 
@@ -978,8 +1098,17 @@ pub async fn upload_checker(
         "Checker binary uploaded"
     );
 
+    // Re-queue any queue_pending submissions now that binaries may be ready
+    let requeued = requeue_pending_submissions(&state, problem_id).await?;
+
+    let msg = if requeued > 0 {
+        format!("Checker uploaded successfully. {} pending submission(s) re-queued for judging.", requeued)
+    } else {
+        "Checker uploaded successfully".to_string()
+    };
+
     Ok(Json(MessageResponse {
-        message: "Checker uploaded successfully".to_string(),
+        message: msg,
     }))
 }
 

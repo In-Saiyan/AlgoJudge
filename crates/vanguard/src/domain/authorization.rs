@@ -232,3 +232,20 @@ pub async fn require_can_submit(ctx: &AuthContext) -> ApiResult<()> {
 
     Err(ApiError::Forbidden)
 }
+
+/// Check if user can make a standalone submission (no contest).
+///
+/// Rule: IsValidUser AND NotRateLimited
+pub async fn require_can_submit_standalone(ctx: &AuthContext) -> ApiResult<()> {
+    let valid_user = IsValidUser;
+    if !valid_user.is_satisfied_by(ctx).await {
+        return Err(ApiError::Forbidden);
+    }
+
+    let rate_limit = NotRateLimited::submission();
+    if !rate_limit.is_satisfied_by(ctx).await {
+        return Err(ApiError::RateLimitExceeded);
+    }
+
+    Ok(())
+}

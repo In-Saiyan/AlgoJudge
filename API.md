@@ -111,12 +111,22 @@ Base URL: `/api/v1`
 | Method | Endpoint | Description | Auth |
 |--------|----------|-------------|------|
 | GET | `/api/v1/submissions` | List submissions | Yes |
-| POST | `/api/v1/submissions` | Create submission (legacy source code) | Yes |
-| POST | `/api/v1/submissions/upload` | Upload ZIP submission (multipart) | Yes |
+| POST | `/api/v1/submissions` | Create submission (source code; `contest_id` optional) | Yes |
+| POST | `/api/v1/submissions/upload` | Upload ZIP submission (multipart; `contest_id` optional) | Yes |
 | GET | `/api/v1/submissions/{id}` | Get submission by ID | Yes (Owner/Admin) |
 | GET | `/api/v1/submissions/{id}/results` | Get submission test results | Yes (Owner/Admin) |
 | GET | `/api/v1/submissions/{id}/source` | Download submission source/ZIP | Yes (Owner/Admin) |
 | GET | `/api/v1/submissions/{id}/logs` | Get compilation/runtime logs | Yes (Owner/Admin) |
+
+> **Standalone submissions:** Both `POST /api/v1/submissions` and
+> `POST /api/v1/submissions/upload` accept submissions without a `contest_id`.
+> When omitted, the submission is a standalone practice run against the problem
+> without contest rules (time window, allowed languages, participant check).
+>
+> **`queue_pending` status:** If the problem's generator or checker binary has
+> not been uploaded yet when Minos picks up the job, the submission enters
+> `queue_pending` status. It will be automatically re-queued for judging once
+> both binaries are uploaded via the problem binary upload endpoints.
 
 ---
 
@@ -205,7 +215,7 @@ All file uploads use `multipart/form-data` format instead of base64 encoding for
 **Query Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `contest_id` | UUID | Yes | Target contest ID |
+| `contest_id` | UUID | No | Target contest ID (omit for standalone/practice submission) |
 | `problem_id` | UUID | Yes | Target problem ID |
 
 **Form Fields:**
@@ -217,9 +227,23 @@ All file uploads use `multipart/form-data` format instead of base64 encoding for
 - Default: 10MB
 - Per-contest configurable via `max_submission_size_mb` (1-100MB)
 
+> **Standalone submissions:** When `contest_id` is omitted the submission is
+> treated as a standalone practice run. The problem must exist and the user must
+> be authenticated. No contest time-window or participant checks are enforced.
+>
+> If the problem's generator or checker binary has not been uploaded yet, the
+> submission will enter `queue_pending` status after compilation and will be
+> automatically re-queued for judging once both binaries are uploaded.
+
 **Example (curl):**
 ```bash
+# Contest submission
 curl -X POST "https://api.algojudge.com/api/v1/submissions/upload?contest_id=...&problem_id=..." \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@submission.zip"
+
+# Standalone submission (no contest)
+curl -X POST "https://api.algojudge.com/api/v1/submissions/upload?problem_id=..." \
   -H "Authorization: Bearer <token>" \
   -F "file=@submission.zip"
 ```

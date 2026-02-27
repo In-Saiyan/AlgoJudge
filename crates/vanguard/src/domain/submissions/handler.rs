@@ -8,7 +8,7 @@ use chrono::Utc;
 use uuid::Uuid;
 use validator::Validate;
 
-use crate::domain::authorization::{build_contest_context, require_can_submit};
+use crate::domain::authorization::{build_auth_context, build_contest_context, require_can_submit, require_can_submit_standalone};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 use crate::middleware::auth::AuthUser;
@@ -17,6 +17,13 @@ use super::request::{CreateSubmissionRequest, LeaderboardQuery, ListSubmissionsQ
 use super::response::*;
 
 /// POST /api/v1/submissions - Submit source code
+///
+/// If `contest_id` is provided, validates the contest is active and the user
+/// is authorized to submit (participant/collaborator/admin). The problem must
+/// be assigned to that contest.
+///
+/// If `contest_id` is omitted, this is a standalone (practice) submission.
+/// The problem must exist and the user simply needs to be valid and not rate-limited.
 pub async fn create_submission(
     State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
@@ -25,64 +32,82 @@ pub async fn create_submission(
     payload.validate().map_err(|e| ApiError::Validation(format!("{}", e)))?;
 
     let user_id = user.id;
-
-    // Check contest exists and is active
-    let contest = sqlx::query_as::<_, ContestCheckRow>(
-        r#"
-        SELECT id, status, starts_at, ends_at, allowed_languages
-        FROM contests WHERE id = $1
-        "#,
-    )
-    .bind(payload.contest_id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| ApiError::NotFound("Contest not found".to_string()))?;
-
-    // Check contest is running
-    let now = Utc::now();
-    if contest.status != "active" {
-        return Err(ApiError::Validation("Contest is not active".to_string()));
-    }
-    if now < contest.starts_at {
-        return Err(ApiError::Validation("Contest has not started yet".to_string()));
-    }
-    if now > contest.ends_at {
-        return Err(ApiError::Validation("Contest has ended".to_string()));
-    }
-
-    // Check language is allowed
     let lang_str = payload.language.to_string();
-    if let Some(allowed) = &contest.allowed_languages {
-        if !allowed.contains(&lang_str) {
-            return Err(ApiError::Validation(format!(
-                "Language '{}' is not allowed in this contest",
-                lang_str
-            )));
-        }
-    }
 
-    // Check submission permission using authorization rules
-    let ctx = build_contest_context(&state, &user, payload.contest_id);
-    require_can_submit(&ctx).await?;
-
-    // Check problem exists and is in contest
-    let problem_in_contest: Option<bool> = sqlx::query_scalar::<_, Option<bool>>(
-        r#"
-        SELECT EXISTS(
-            SELECT 1 FROM problems p
-            JOIN contest_problems cp ON cp.problem_id = p.id
-            WHERE p.id = $1 AND cp.contest_id = $2
+    if let Some(contest_id) = payload.contest_id {
+        // ── Contest submission ──────────────────────────────────────────
+        let contest = sqlx::query_as::<_, ContestCheckRow>(
+            r#"
+            SELECT id, status, starts_at, ends_at, allowed_languages
+            FROM contests WHERE id = $1
+            "#,
         )
-        "#,
-    )
-    .bind(payload.problem_id)
-    .bind(payload.contest_id)
-    .fetch_one(&state.db)
-    .await?;
-    let problem_in_contest = problem_in_contest.unwrap_or(false);
+        .bind(contest_id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("Contest not found".to_string()))?;
 
-    if !problem_in_contest {
-        return Err(ApiError::NotFound("Problem not found in this contest".to_string()));
+        // Check contest is running
+        let now = Utc::now();
+        if contest.status != "active" {
+            return Err(ApiError::Validation("Contest is not active".to_string()));
+        }
+        if now < contest.starts_at {
+            return Err(ApiError::Validation("Contest has not started yet".to_string()));
+        }
+        if now > contest.ends_at {
+            return Err(ApiError::Validation("Contest has ended".to_string()));
+        }
+
+        // Check language is allowed
+        if let Some(allowed) = &contest.allowed_languages {
+            if !allowed.contains(&lang_str) {
+                return Err(ApiError::Validation(format!(
+                    "Language '{}' is not allowed in this contest",
+                    lang_str
+                )));
+            }
+        }
+
+        // Check submission permission using authorization rules
+        let ctx = build_contest_context(&state, &user, contest_id);
+        require_can_submit(&ctx).await?;
+
+        // Check problem exists and is in contest
+        let problem_in_contest: Option<bool> = sqlx::query_scalar::<_, Option<bool>>(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM problems p
+                JOIN contest_problems cp ON cp.problem_id = p.id
+                WHERE p.id = $1 AND cp.contest_id = $2
+            )
+            "#,
+        )
+        .bind(payload.problem_id)
+        .bind(contest_id)
+        .fetch_one(&state.db)
+        .await?;
+        let problem_in_contest = problem_in_contest.unwrap_or(false);
+
+        if !problem_in_contest {
+            return Err(ApiError::NotFound("Problem not found in this contest".to_string()));
+        }
+    } else {
+        // ── Standalone submission ──────────────────────────────────────
+        let ctx = build_auth_context(&state, &user);
+        require_can_submit_standalone(&ctx).await?;
+
+        // Check problem exists
+        let problem_exists: Option<bool> = sqlx::query_scalar::<_, Option<bool>>(
+            "SELECT EXISTS(SELECT 1 FROM problems WHERE id = $1)",
+        )
+        .bind(payload.problem_id)
+        .fetch_one(&state.db)
+        .await?;
+
+        if !problem_exists.unwrap_or(false) {
+            return Err(ApiError::NotFound("Problem not found".to_string()));
+        }
     }
 
     // Create submission
@@ -100,7 +125,7 @@ pub async fn create_submission(
         "#,
     )
     .bind(submission_id)
-    .bind(payload.contest_id)
+    .bind(payload.contest_id) // NULL for standalone
     .bind(payload.problem_id)
     .bind(user_id)
     .bind(&lang_str)
@@ -127,6 +152,7 @@ pub async fn create_submission(
     tracing::info!(
         submission_id = %submission_id,
         stream_id = %stream_id,
+        contest_id = ?payload.contest_id,
         "Submission queued for compilation"
     );
 
@@ -153,6 +179,9 @@ struct ContestCheckRow {
 }
 
 /// POST /api/v1/submissions/zip - Submit ZIP file (algorithmic benchmark)
+///
+/// If `contest_id` is provided, validates the contest is active and the user
+/// is authorized to submit. If omitted, this is a standalone submission.
 pub async fn create_zip_submission(
     State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
@@ -161,56 +190,73 @@ pub async fn create_zip_submission(
 ) -> ApiResult<Json<SubmissionResponse>> {
     let user_id = user.id;
 
-    // Check contest exists and is active
-    let contest = sqlx::query_as::<_, ContestCheckRowSimple>(
-        r#"
-        SELECT id, status, starts_at, ends_at
-        FROM contests WHERE id = $1
-        "#,
-    )
-    .bind(params.contest_id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| ApiError::NotFound("Contest not found".to_string()))?;
-
-    // Check contest is running
-    let now = Utc::now();
-    if contest.status != "active" {
-        return Err(ApiError::Validation("Contest is not active".to_string()));
-    }
-    if now < contest.starts_at {
-        return Err(ApiError::Validation("Contest has not started yet".to_string()));
-    }
-    if now > contest.ends_at {
-        return Err(ApiError::Validation("Contest has ended".to_string()));
-    }
-
-    // Check submission permission using authorization rules
-    let ctx = build_contest_context(&state, &user, params.contest_id);
-    require_can_submit(&ctx).await?;
-
-    // Check problem exists and is in contest
-    let problem_in_contest: Option<bool> = sqlx::query_scalar::<_, Option<bool>>(
-        r#"
-        SELECT EXISTS(
-            SELECT 1 FROM problems p
-            JOIN contest_problems cp ON cp.problem_id = p.id
-            WHERE p.id = $1 AND cp.contest_id = $2
+    if let Some(contest_id) = params.contest_id {
+        // ── Contest submission ──────────────────────────────────────────
+        let contest = sqlx::query_as::<_, ContestCheckRowSimple>(
+            r#"
+            SELECT id, status, starts_at, ends_at
+            FROM contests WHERE id = $1
+            "#,
         )
-        "#,
-    )
-    .bind(params.problem_id)
-    .bind(params.contest_id)
-    .fetch_one(&state.db)
-    .await?;
-    let problem_in_contest = problem_in_contest.unwrap_or(false);
+        .bind(contest_id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("Contest not found".to_string()))?;
 
-    if !problem_in_contest {
-        return Err(ApiError::NotFound("Problem not found in this contest".to_string()));
+        let now = Utc::now();
+        if contest.status != "active" {
+            return Err(ApiError::Validation("Contest is not active".to_string()));
+        }
+        if now < contest.starts_at {
+            return Err(ApiError::Validation("Contest has not started yet".to_string()));
+        }
+        if now > contest.ends_at {
+            return Err(ApiError::Validation("Contest has ended".to_string()));
+        }
+
+        let ctx = build_contest_context(&state, &user, contest_id);
+        require_can_submit(&ctx).await?;
+
+        let problem_in_contest: Option<bool> = sqlx::query_scalar::<_, Option<bool>>(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM problems p
+                JOIN contest_problems cp ON cp.problem_id = p.id
+                WHERE p.id = $1 AND cp.contest_id = $2
+            )
+            "#,
+        )
+        .bind(params.problem_id)
+        .bind(contest_id)
+        .fetch_one(&state.db)
+        .await?;
+
+        if !problem_in_contest.unwrap_or(false) {
+            return Err(ApiError::NotFound("Problem not found in this contest".to_string()));
+        }
+    } else {
+        // ── Standalone submission ──────────────────────────────────────
+        let ctx = build_auth_context(&state, &user);
+        require_can_submit_standalone(&ctx).await?;
+
+        let problem_exists: Option<bool> = sqlx::query_scalar::<_, Option<bool>>(
+            "SELECT EXISTS(SELECT 1 FROM problems WHERE id = $1)",
+        )
+        .bind(params.problem_id)
+        .fetch_one(&state.db)
+        .await?;
+
+        if !problem_exists.unwrap_or(false) {
+            return Err(ApiError::NotFound("Problem not found".to_string()));
+        }
     }
 
-    // Get contest-specific upload size limit
-    let max_size = get_contest_upload_limit(&state.db, params.contest_id).await?;
+    // Get upload size limit (contest-specific or default)
+    let max_size = if let Some(contest_id) = params.contest_id {
+        get_contest_upload_limit(&state.db, contest_id).await?
+    } else {
+        DEFAULT_MAX_SUBMISSION_SIZE
+    };
 
     // Process multipart form with streaming size validation
     let mut zip_data: Option<Vec<u8>> = None;
@@ -224,11 +270,10 @@ pub async fn create_zip_submission(
                 ApiError::Validation(format!("Failed to read file: {}", e))
             })?;
 
-            // Contest-specific size limit (default 10MB, max 100MB)
             if data.len() > max_size {
                 return Err(ApiError::Validation(
                     format!(
-                        "File size ({:.2}MB) exceeds contest limit ({:.2}MB)",
+                        "File size ({:.2}MB) exceeds limit ({:.2}MB)",
                         data.len() as f64 / 1024.0 / 1024.0,
                         max_size as f64 / 1024.0 / 1024.0
                     )
@@ -243,33 +288,35 @@ pub async fn create_zip_submission(
         ApiError::Validation("No file uploaded".to_string())
     })?;
 
-    // Validate ZIP structure (includes security checks)
     validate_zip_structure(&zip_data)?;
 
-    // Create submission
     let submission_id = Uuid::new_v4();
     let submitted_at = Utc::now();
     let file_size = zip_data.len() as i64;
 
-    // Save ZIP to storage
-    let storage_path = format!(
-        "/mnt/data/submissions/{}/{}/{}.zip",
-        params.contest_id, user_id, submission_id
-    );
+    // Save ZIP to storage – use "standalone" bucket when no contest
+    let storage_path = if let Some(contest_id) = params.contest_id {
+        format!(
+            "/mnt/data/submissions/{}/{}/{}.zip",
+            contest_id, user_id, submission_id
+        )
+    } else {
+        format!(
+            "/mnt/data/submissions/standalone/{}/{}.zip",
+            user_id, submission_id
+        )
+    };
 
-    // Create directory structure
     if let Some(parent) = std::path::Path::new(&storage_path).parent() {
         tokio::fs::create_dir_all(parent).await.map_err(|e| {
             ApiError::Internal(format!("Failed to create directory: {}", e))
         })?;
     }
 
-    // Write file
     tokio::fs::write(&storage_path, &zip_data).await.map_err(|e| {
         ApiError::Internal(format!("Failed to save submission: {}", e))
     })?;
 
-    // Insert into database (including file_size for tracking)
     sqlx::query(
         r#"
         INSERT INTO submissions (
@@ -281,7 +328,7 @@ pub async fn create_zip_submission(
         "#,
     )
     .bind(submission_id)
-    .bind(params.contest_id)
+    .bind(params.contest_id) // NULL for standalone
     .bind(params.problem_id)
     .bind(user_id)
     .bind(&storage_path)
@@ -290,7 +337,6 @@ pub async fn create_zip_submission(
     .execute(&state.db)
     .await?;
 
-    // Queue for compilation via Redis Stream
     let mut conn = state.redis.get().await?;
 
     let stream_id: String = redis::cmd("XADD")
@@ -308,6 +354,7 @@ pub async fn create_zip_submission(
     tracing::info!(
         submission_id = %submission_id,
         stream_id = %stream_id,
+        contest_id = ?params.contest_id,
         "ZIP submission queued for compilation"
     );
 
@@ -457,7 +504,7 @@ pub async fn list_submissions(
         FROM submissions s
         JOIN users u ON u.id = s.user_id
         JOIN problems p ON p.id = s.problem_id
-        JOIN contests c ON c.id = s.contest_id
+        LEFT JOIN contests c ON c.id = s.contest_id
         LEFT JOIN contest_problems cp ON cp.contest_id = s.contest_id AND cp.problem_id = s.problem_id
         ORDER BY s.submitted_at DESC
         LIMIT $1 OFFSET $2
@@ -489,10 +536,10 @@ pub async fn list_submissions(
                 title: row.problem_title,
                 problem_code: row.problem_code,
             },
-            contest: ContestInfo {
-                id: row.contest_id,
-                title: row.contest_title,
-            },
+            contest: row.contest_id.zip(row.contest_title).map(|(id, title)| ContestInfo {
+                id,
+                title,
+            }),
             language: row.language,
             status: row.status,
             score: row.score,
@@ -516,7 +563,7 @@ pub async fn list_submissions(
 #[derive(Debug, sqlx::FromRow)]
 struct SubmissionRow {
     id: Uuid,
-    contest_id: Uuid,
+    contest_id: Option<Uuid>,
     problem_id: Uuid,
     user_id: Uuid,
     language: Option<String>,
@@ -529,7 +576,7 @@ struct SubmissionRow {
     display_name: Option<String>,
     problem_title: String,
     problem_code: Option<String>,
-    contest_title: String,
+    contest_title: Option<String>,
 }
 
 /// GET /api/v1/submissions/{id} - Get submission details
@@ -552,7 +599,7 @@ pub async fn get_submission(
         FROM submissions s
         JOIN users u ON u.id = s.user_id
         JOIN problems p ON p.id = s.problem_id
-        JOIN contests c ON c.id = s.contest_id
+        LEFT JOIN contests c ON c.id = s.contest_id
         LEFT JOIN contest_problems cp ON cp.contest_id = s.contest_id AND cp.problem_id = s.problem_id
         WHERE s.id = $1
         "#,
@@ -576,10 +623,10 @@ pub async fn get_submission(
             title: row.problem_title,
             problem_code: row.problem_code,
         },
-        contest: ContestInfo {
-            id: row.contest_id,
-            title: row.contest_title,
-        },
+        contest: row.contest_id.zip(row.contest_title).map(|(id, title)| ContestInfo {
+            id,
+            title,
+        }),
         submission_type: row.submission_type,
         language: row.language,
         status: row.status,
@@ -599,7 +646,7 @@ pub async fn get_submission(
 #[derive(Debug, sqlx::FromRow)]
 struct SubmissionDetailRow {
     id: Uuid,
-    contest_id: Uuid,
+    contest_id: Option<Uuid>,
     problem_id: Uuid,
     user_id: Uuid,
     submission_type: String,
@@ -618,7 +665,7 @@ struct SubmissionDetailRow {
     display_name: Option<String>,
     problem_title: String,
     problem_code: Option<String>,
-    contest_title: String,
+    contest_title: Option<String>,
 }
 
 /// GET /api/v1/submissions/{id}/results - Get test case results
@@ -755,7 +802,7 @@ pub async fn get_user_submissions(
         FROM submissions s
         JOIN users u ON u.id = s.user_id
         JOIN problems p ON p.id = s.problem_id
-        JOIN contests c ON c.id = s.contest_id
+        LEFT JOIN contests c ON c.id = s.contest_id
         LEFT JOIN contest_problems cp ON cp.contest_id = s.contest_id AND cp.problem_id = s.problem_id
         WHERE s.user_id = $1
         ORDER BY s.submitted_at DESC
@@ -792,10 +839,10 @@ pub async fn get_user_submissions(
                 title: row.problem_title,
                 problem_code: row.problem_code,
             },
-            contest: ContestInfo {
-                id: row.contest_id,
-                title: row.contest_title,
-            },
+            contest: row.contest_id.zip(row.contest_title).map(|(id, title)| ContestInfo {
+                id,
+                title,
+            }),
             language: row.language,
             status: row.status,
             score: row.score,
