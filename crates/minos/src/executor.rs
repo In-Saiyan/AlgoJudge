@@ -29,6 +29,10 @@ pub struct ExecutionContext {
     pub memory_limit_kb: u64,
     /// Number of test cases
     pub num_testcases: i32,
+    /// Maximum number of threads the submission may spawn (1 = single-threaded)
+    pub max_threads: i32,
+    /// Whether the submission is allowed network access during execution
+    pub network_allowed: bool,
 }
 
 /// Sandboxed executor
@@ -56,6 +60,18 @@ impl Executor {
 
     /// Execute a submission against all test cases
     pub async fn execute(&self, ctx: &ExecutionContext) -> Result<SubmissionResult> {
+        // Clamp max_threads to the system-wide limit (defense in depth)
+        let effective_max_threads = ctx.max_threads.min(self.execution.max_threads_limit).max(1);
+        if ctx.max_threads > self.execution.max_threads_limit {
+            tracing::warn!(
+                submission_id = %ctx.submission_id,
+                requested = ctx.max_threads,
+                limit = self.execution.max_threads_limit,
+                "max_threads from DB exceeds system limit — clamping to {}",
+                effective_max_threads,
+            );
+        }
+
         // Get path to compiled binary
         let binary_path = self
             .storage
@@ -107,7 +123,7 @@ impl Executor {
 
         for testcase in &testcases {
             let result = self
-                .run_testcase(ctx, &binary_path, testcase, &temp_dir)
+                .run_testcase(ctx, effective_max_threads, &binary_path, testcase, &temp_dir)
                 .await;
 
             match result {
@@ -147,6 +163,7 @@ impl Executor {
     async fn run_testcase(
         &self,
         ctx: &ExecutionContext,
+        effective_max_threads: i32,
         binary_path: &Path,
         testcase: &TestCase,
         temp_dir: &Path,
@@ -163,6 +180,8 @@ impl Executor {
                 &output_path,
                 ctx.time_limit_ms,
                 ctx.memory_limit_kb,
+                effective_max_threads,
+                ctx.network_allowed,
             )
             .await?;
 
@@ -270,6 +289,10 @@ impl Executor {
     /// For interpreted languages the "binary" is a directory containing
     /// `run.sh` and the source files.  In that case we invoke
     /// `bash run.sh <input_file> <output_file>` with the directory as cwd.
+    ///
+    /// `max_threads` controls the PID/thread limit (via RLIMIT_NPROC when
+    /// cgroups are available).  `network_allowed` controls whether loopback
+    /// and external networking are permitted.
     async fn execute_sandboxed(
         &self,
         binary_path: &Path,
@@ -277,9 +300,31 @@ impl Executor {
         output_path: &Path,
         time_limit_ms: u64,
         memory_limit_kb: u64,
+        max_threads: i32,
+        network_allowed: bool,
     ) -> Result<ExecutionResult> {
         // For production, this should use proper sandboxing (nsjail, seccomp, cgroups)
         // This is a simplified version that uses basic process isolation
+
+        tracing::debug!(
+            binary = %binary_path.display(),
+            time_limit_ms,
+            memory_limit_kb,
+            max_threads,
+            network_allowed,
+            "Executing submission binary"
+        );
+
+        // Helper closure to apply per-problem sandbox env vars to a Command.
+        // These are consumed by the production nsjail/cgroup wrapper;
+        // in the simplified executor they serve as documentation and are
+        // available to the child process for self-limiting.
+        let apply_sandbox_env = |cmd: &mut Command| {
+            cmd.env("MAX_THREADS", max_threads.to_string());
+            cmd.env("NETWORK_ALLOWED", if network_allowed { "1" } else { "0" });
+            cmd.env("TIME_LIMIT_MS", time_limit_ms.to_string());
+            cmd.env("MEMORY_LIMIT_KB", memory_limit_kb.to_string());
+        };
 
         let child = if binary_path.is_dir() {
             // Interpreted language: run.sh inside the directory.
@@ -299,8 +344,8 @@ impl Executor {
 
             if forwards_args {
                 // run.sh handles arg passing — invoke it directly
-                Command::new("bash")
-                    .arg(&run_sh)
+                let mut cmd = Command::new("bash");
+                cmd.arg(&run_sh)
                     .arg(input_path)
                     .arg(output_path)
                     .env("INPUT_FILE", input_path)
@@ -309,8 +354,9 @@ impl Executor {
                     .stdin(Stdio::null())
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
-                    .kill_on_drop(true)
-                    .spawn()?
+                    .kill_on_drop(true);
+                apply_sandbox_env(&mut cmd);
+                cmd.spawn()?
             } else {
                 // run.sh does NOT forward args (e.g. just `python3 main.py`).
                 // Extract the last non-comment command and append our args so
@@ -327,8 +373,8 @@ impl Executor {
                     "run.sh does not forward args — auto-appending file paths"
                 );
 
-                Command::new("bash")
-                    .arg("-c")
+                let mut cmd = Command::new("bash");
+                cmd.arg("-c")
                     .arg(format!("{} \"$1\" \"$2\"", cmd_line))
                     .arg("_") // $0 placeholder
                     .arg(input_path)
@@ -339,20 +385,22 @@ impl Executor {
                     .stdin(Stdio::null())
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
-                    .kill_on_drop(true)
-                    .spawn()?
+                    .kill_on_drop(true);
+                apply_sandbox_env(&mut cmd);
+                cmd.spawn()?
             }
         } else {
-            Command::new(binary_path)
-                .arg(input_path)
+            let mut cmd = Command::new(binary_path);
+            cmd.arg(input_path)
                 .arg(output_path)
                 .env("INPUT_FILE", input_path)
                 .env("OUTPUT_FILE", output_path)
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
-                .kill_on_drop(true)
-                .spawn()?
+                .kill_on_drop(true);
+            apply_sandbox_env(&mut cmd);
+            cmd.spawn()?
         };
 
         // Wait with timeout

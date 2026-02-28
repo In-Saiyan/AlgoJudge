@@ -57,6 +57,15 @@ pub struct CreateProblemRequest {
     #[serde(default = "default_num_test_cases")]
     pub num_test_cases: i32,
 
+    /// Maximum number of threads the submission is allowed to spawn (1 = single-threaded).
+    #[validate(range(min = 1, max = 256, message = "Max threads must be 1-256"))]
+    #[serde(default = "default_max_threads")]
+    pub max_threads: i32,
+
+    /// Whether to allow network access during execution.
+    #[serde(default)]
+    pub network_allowed: bool,
+
     // Note: generator and checker binaries are uploaded separately via
     // POST /api/v1/problems/{id}/generator and POST /api/v1/problems/{id}/checker
 
@@ -83,6 +92,10 @@ fn default_memory_limit() -> i32 {
 
 fn default_num_test_cases() -> i32 {
     10
+}
+
+fn default_max_threads() -> i32 {
+    1
 }
 
 fn default_max_score() -> i32 {
@@ -117,6 +130,13 @@ pub struct UpdateProblemRequest {
 
     #[validate(range(min = 1, max = 100, message = "Number of test cases must be 1-100"))]
     pub num_test_cases: Option<i32>,
+
+    /// Maximum number of threads the submission is allowed to spawn.
+    #[validate(range(min = 1, max = 256, message = "Max threads must be 1-256"))]
+    pub max_threads: Option<i32>,
+
+    /// Whether to allow network access during execution.
+    pub network_allowed: Option<bool>,
 
     // Note: generator and checker binaries are uploaded separately via
     // POST /api/v1/problems/{id}/generator and POST /api/v1/problems/{id}/checker
@@ -187,4 +207,10 @@ pub struct AddProblemToContestRequest {
 
     /// Override memory limit for this contest
     pub memory_limit_kb: Option<i32>,
+
+    /// Override max threads for this contest
+    pub max_threads: Option<i32>,
+
+    /// Override network_allowed for this contest
+    pub network_allowed: Option<bool>,
 }

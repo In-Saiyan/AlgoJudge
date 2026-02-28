@@ -45,6 +45,8 @@ struct ProblemRow {
     num_test_cases: i32,
     generator_path: Option<String>,
     checker_path: Option<String>,
+    max_threads: i32,
+    network_allowed: bool,
     max_score: i32,
     partial_scoring: bool,
     is_public: bool,
@@ -80,6 +82,7 @@ pub async fn list_problems(
         r#"
         SELECT 
             p.id, p.title, p.difficulty, p.tags, p.time_limit_ms, p.memory_limit_kb,
+            p.max_threads, p.network_allowed,
             p.max_score, p.is_public, p.created_at,
             u.id as owner_id, u.username, u.display_name
         FROM problems p
@@ -91,7 +94,7 @@ pub async fn list_problems(
         visibility_filter
     );
 
-    let rows: Vec<(Uuid, String, Option<String>, Option<Vec<String>>, i32, i32, i32, bool, DateTime<Utc>, Uuid, String, Option<String>)> = 
+    let rows: Vec<(Uuid, String, Option<String>, Option<Vec<String>>, i32, i32, i32, bool, i32, bool, DateTime<Utc>, Uuid, String, Option<String>)> = 
         sqlx::query_as(&sql)
             .bind(per_page as i64)
             .bind(offset)
@@ -116,13 +119,15 @@ pub async fn list_problems(
             tags: row.3,
             time_limit_ms: row.4,
             memory_limit_kb: row.5,
-            max_score: row.6,
-            is_public: row.7,
-            created_at: row.8,
+            max_threads: row.6,
+            network_allowed: row.7,
+            max_score: row.8,
+            is_public: row.9,
+            created_at: row.10,
             owner: OwnerInfo {
-                id: row.9,
-                username: row.10,
-                display_name: row.11,
+                id: row.11,
+                username: row.12,
+                display_name: row.13,
             },
         })
         .collect();
@@ -155,6 +160,17 @@ pub async fn create_problem(
         return Err(ApiError::Forbidden);
     }
 
+    // Validate max_threads against system-wide cap
+    let max_threads_limit = state.config.max_threads_limit;
+    if payload.max_threads > max_threads_limit {
+        return Err(ApiError::Validation(
+            format!(
+                "max_threads ({}) exceeds the system limit of {}. Please set a value between 1 and {}.",
+                payload.max_threads, max_threads_limit, max_threads_limit
+            ),
+        ));
+    }
+
     let id = Uuid::new_v4();
     let now = Utc::now();
     let difficulty = payload.difficulty.as_ref().map(|d| d.to_string());
@@ -167,11 +183,12 @@ pub async fn create_problem(
             id, title, description, input_format, output_format, constraints,
             sample_input, sample_output, sample_explanation, difficulty, tags,
             time_limit_ms, memory_limit_kb, num_test_cases, generator_path, checker_path,
+            max_threads, network_allowed,
             max_score, partial_scoring, is_public, allowed_languages, owner_id,
             created_at, updated_at
         ) VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NULL, NULL,
-            $15, $16, $17, $18, $19, $20, $20
+            $15, $16, $17, $18, $19, $20, $21, $22, $22
         )
         "#
     )
@@ -189,6 +206,8 @@ pub async fn create_problem(
         .bind(payload.time_limit_ms)
         .bind(payload.memory_limit_kb)
         .bind(payload.num_test_cases)
+        .bind(payload.max_threads)
+        .bind(payload.network_allowed)
         .bind(payload.max_score)
         .bind(payload.partial_scoring)
         .bind(payload.is_public)
@@ -215,6 +234,8 @@ pub async fn create_problem(
             tags: payload.tags,
             time_limit_ms: payload.time_limit_ms,
             memory_limit_kb: payload.memory_limit_kb,
+            max_threads: payload.max_threads,
+            network_allowed: payload.network_allowed,
             num_test_cases: payload.num_test_cases,
             status: "draft".to_string(),
             generator_uploaded: false,
@@ -282,6 +303,8 @@ pub async fn get_problem(
         tags: problem.tags,
         time_limit_ms: problem.time_limit_ms,
         memory_limit_kb: problem.memory_limit_kb,
+        max_threads: problem.max_threads,
+        network_allowed: problem.network_allowed,
         num_test_cases: problem.num_test_cases,
         generator_path: if is_owner || user_role == Some("admin") { problem.generator_path } else { None },
         checker_path: if is_owner || user_role == Some("admin") { problem.checker_path } else { None },
@@ -340,6 +363,20 @@ pub async fn update_problem(
     let time_limit_ms = payload.time_limit_ms.unwrap_or(problem.time_limit_ms);
     let memory_limit_kb = payload.memory_limit_kb.unwrap_or(problem.memory_limit_kb);
     let num_test_cases = payload.num_test_cases.unwrap_or(problem.num_test_cases);
+    let max_threads = payload.max_threads.unwrap_or(problem.max_threads);
+    let network_allowed = payload.network_allowed.unwrap_or(problem.network_allowed);
+
+    // Validate max_threads against system-wide cap
+    let max_threads_limit = state.config.max_threads_limit;
+    if max_threads > max_threads_limit {
+        return Err(ApiError::Validation(
+            format!(
+                "max_threads ({}) exceeds the system limit of {}. Please set a value between 1 and {}.",
+                max_threads, max_threads_limit, max_threads_limit
+            ),
+        ));
+    }
+
     // Note: generator_path and checker_path are not updated here
     // They are updated via the dedicated upload endpoints
     let max_score = payload.max_score.unwrap_or(problem.max_score);
@@ -355,8 +392,8 @@ pub async fn update_problem(
             title = $2, description = $3, input_format = $4, output_format = $5,
             constraints = $6, sample_input = $7, sample_output = $8, sample_explanation = $9,
             difficulty = $10, tags = $11, time_limit_ms = $12, memory_limit_kb = $13,
-            num_test_cases = $14, max_score = $15,
-            partial_scoring = $16, is_public = $17, allowed_languages = $18, updated_at = $19
+            num_test_cases = $14, max_threads = $15, network_allowed = $16, max_score = $17,
+            partial_scoring = $18, is_public = $19, allowed_languages = $20, updated_at = $21
         WHERE id = $1
         "#
     )
@@ -374,6 +411,8 @@ pub async fn update_problem(
         .bind(time_limit_ms)
         .bind(memory_limit_kb)
         .bind(num_test_cases)
+        .bind(max_threads)
+        .bind(network_allowed)
         .bind(max_score)
         .bind(partial_scoring)
         .bind(is_public)
@@ -402,6 +441,8 @@ pub async fn update_problem(
         tags,
         time_limit_ms,
         memory_limit_kb,
+        max_threads,
+        network_allowed,
         num_test_cases,
         status: status.to_string(),
         generator_uploaded,
@@ -501,12 +542,14 @@ pub async fn list_contest_problems(
         }
     }
 
-    let rows: Vec<(Uuid, Uuid, String, String, Option<String>, i32, i32, i32, i32)> = sqlx::query_as(
+    let rows: Vec<(Uuid, Uuid, String, String, Option<String>, i32, i32, i32, bool, i32, i32)> = sqlx::query_as(
         r#"
         SELECT 
             cp.id, cp.problem_id, cp.problem_code, p.title, p.difficulty,
             COALESCE(cp.time_limit_ms, p.time_limit_ms) as time_limit_ms,
             COALESCE(cp.memory_limit_kb, p.memory_limit_kb) as memory_limit_kb,
+            COALESCE(cp.max_threads, p.max_threads) as max_threads,
+            COALESCE(cp.network_allowed, p.network_allowed) as network_allowed,
             COALESCE(cp.max_score, p.max_score) as max_score,
             cp.sort_order
         FROM contest_problems cp
@@ -530,8 +573,10 @@ pub async fn list_contest_problems(
             difficulty: row.4,
             time_limit_ms: row.5,
             memory_limit_kb: row.6,
-            max_score: row.7,
-            sort_order: row.8,
+            max_threads: row.7,
+            network_allowed: row.8,
+            max_score: row.9,
+            sort_order: row.10,
         })
         .collect();
 
@@ -580,9 +625,27 @@ pub async fn add_problem_to_contest(
         return Err(ApiError::Forbidden);
     }
 
+    // Validate max_threads override against system-wide cap
+    if let Some(mt) = payload.max_threads {
+        let max_threads_limit = state.config.max_threads_limit;
+        if mt > max_threads_limit {
+            return Err(ApiError::Validation(
+                format!(
+                    "max_threads ({}) exceeds the system limit of {}. Please set a value between 1 and {}.",
+                    mt, max_threads_limit, max_threads_limit
+                ),
+            ));
+        }
+        if mt < 1 {
+            return Err(ApiError::Validation(
+                "max_threads must be at least 1.".to_string(),
+            ));
+        }
+    }
+
     // Check problem exists
-    let problem: Option<(String, Option<String>, i32, i32, i32)> = sqlx::query_as(
-        "SELECT title, difficulty, time_limit_ms, memory_limit_kb, max_score FROM problems WHERE id = $1"
+    let problem: Option<(String, Option<String>, i32, i32, i32, bool, i32)> = sqlx::query_as(
+        "SELECT title, difficulty, time_limit_ms, memory_limit_kb, max_score, network_allowed, max_threads FROM problems WHERE id = $1"
     )
         .bind(payload.problem_id)
         .fetch_optional(&state.db)
@@ -627,8 +690,9 @@ pub async fn add_problem_to_contest(
         r#"
         INSERT INTO contest_problems (
             id, contest_id, problem_id, problem_code, sort_order,
-            max_score, time_limit_ms, memory_limit_kb, added_at, added_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            max_score, time_limit_ms, memory_limit_kb, max_threads, network_allowed,
+            added_at, added_by
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         "#
     )
         .bind(id)
@@ -639,6 +703,8 @@ pub async fn add_problem_to_contest(
         .bind(payload.max_score)
         .bind(payload.time_limit_ms)
         .bind(payload.memory_limit_kb)
+        .bind(payload.max_threads)
+        .bind(payload.network_allowed)
         .bind(now)
         .bind(user.id)
         .execute(&state.db)
@@ -655,6 +721,8 @@ pub async fn add_problem_to_contest(
             difficulty: problem.1,
             time_limit_ms: payload.time_limit_ms.unwrap_or(problem.2),
             memory_limit_kb: payload.memory_limit_kb.unwrap_or(problem.3),
+            max_threads: payload.max_threads.unwrap_or(problem.6),
+            network_allowed: payload.network_allowed.unwrap_or(problem.5),
             max_score: payload.max_score.unwrap_or(problem.4),
             sort_order,
         }),
@@ -831,7 +899,7 @@ async fn requeue_pending_submissions(
     // Fetch problem limits for the run_queue message
     let problem = sqlx::query_as::<_, ProblemLimitsRow>(
         r#"
-        SELECT id, time_limit_ms, memory_limit_kb, num_test_cases
+        SELECT id, time_limit_ms, memory_limit_kb, num_test_cases, max_threads, network_allowed
         FROM problems WHERE id = $1
         "#,
     )
@@ -914,6 +982,8 @@ struct ProblemLimitsRow {
     time_limit_ms: i32,
     memory_limit_kb: i32,
     num_test_cases: i32,
+    max_threads: i32,
+    network_allowed: bool,
 }
 
 #[derive(Debug, FromRow)]

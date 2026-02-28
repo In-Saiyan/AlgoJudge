@@ -24,6 +24,10 @@ pub struct JudgeJob {
     pub time_limit_ms: u64,
     pub memory_limit_kb: u64,
     pub num_testcases: i32,
+    /// Maximum threads the submission may use (1 = single-threaded).
+    pub max_threads: i32,
+    /// Whether network access is allowed during execution.
+    pub network_allowed: bool,
     #[serde(default)]
     pub retry_count: u32,
 }
@@ -36,6 +40,8 @@ struct SubmissionProblemRow {
     time_limit_ms: i32,
     memory_limit_kb: i32,
     num_test_cases: i32,
+    max_threads: i32,
+    network_allowed: bool,
 }
 
 /// Judge consumer that processes jobs from Redis Stream
@@ -337,9 +343,15 @@ impl JudgeConsumer {
         let row = sqlx::query_as::<_, SubmissionProblemRow>(
             r#"
             SELECT s.problem_id, s.contest_id,
-                   p.time_limit_ms, p.memory_limit_kb, p.num_test_cases
+                   COALESCE(cp.time_limit_ms, p.time_limit_ms) AS time_limit_ms,
+                   COALESCE(cp.memory_limit_kb, p.memory_limit_kb) AS memory_limit_kb,
+                   p.num_test_cases,
+                   COALESCE(cp.max_threads, p.max_threads) AS max_threads,
+                   COALESCE(cp.network_allowed, p.network_allowed) AS network_allowed
             FROM submissions s
             JOIN problems p ON p.id = s.problem_id
+            LEFT JOIN contest_problems cp
+                   ON cp.contest_id = s.contest_id AND cp.problem_id = s.problem_id
             WHERE s.id = $1
             "#,
         )
@@ -355,6 +367,8 @@ impl JudgeConsumer {
             time_limit_ms: row.time_limit_ms as u64,
             memory_limit_kb: row.memory_limit_kb as u64,
             num_testcases: row.num_test_cases,
+            max_threads: row.max_threads,
+            network_allowed: row.network_allowed,
             retry_count,
         })
     }
@@ -398,6 +412,8 @@ impl JudgeConsumer {
             time_limit_ms: job.time_limit_ms,
             memory_limit_kb: job.memory_limit_kb,
             num_testcases: job.num_testcases,
+            max_threads: job.max_threads,
+            network_allowed: job.network_allowed,
         };
 
         // Execute and judge

@@ -88,6 +88,11 @@ pub struct ExecutionConfig {
 
     /// Checker memory limit in KB
     pub checker_memory_limit_kb: u64,
+
+    /// Hard ceiling for per-problem max_threads.
+    /// The value from the DB is clamped to this at execution time.
+    /// Controlled by the `MAX_THREADS_LIMIT` env var (default: 64).
+    pub max_threads_limit: i32,
 }
 
 impl Config {
@@ -166,6 +171,10 @@ impl Config {
                     .ok()
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(4 * 1024 * 1024), // 4 GB
+                max_threads_limit: env::var("MAX_THREADS_LIMIT")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(64),
             },
         }
     }

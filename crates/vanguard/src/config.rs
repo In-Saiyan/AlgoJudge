@@ -25,6 +25,9 @@ pub struct Config {
     pub jwt_refresh_expiration: i64,
     /// Environment (development, staging, production)
     pub environment: String,
+    /// Maximum threads/cores a problem setter can allocate per problem.
+    /// Controlled by the `MAX_THREADS_LIMIT` env var (default: 64).
+    pub max_threads_limit: i32,
 }
 
 impl Config {
@@ -54,6 +57,10 @@ impl Config {
                 .parse()
                 .expect("JWT_REFRESH_EXPIRATION must be a number"),
             environment: env::var("ENVIRONMENT").unwrap_or_else(|_| "development".to_string()),
+            max_threads_limit: env::var("MAX_THREADS_LIMIT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(64),
         }
     }
 
