@@ -50,6 +50,11 @@ pub struct Config {
     pub max_cpu_cores: u32,
     /// Per-language Docker image overrides
     pub container_images: ContainerImages,
+    /// Docker API version to negotiate with the daemon.
+    /// Set this when the client binary is older than the daemon's
+    /// minimum supported API version (e.g. "1.44").
+    /// When `None` the client uses its built-in default.
+    pub docker_api_version: Option<String>,
 }
 
 impl Config {
@@ -97,6 +102,7 @@ impl Config {
                 zig: env::var("CONTAINER_IMAGE_ZIG").ok(),
                 generic: env::var("CONTAINER_IMAGE_GENERIC").ok(),
             },
+            docker_api_version: env::var("DOCKER_API_VERSION").ok(),
         }
     }
 }

@@ -13,6 +13,13 @@ use tokio::process::Command;
 
 use crate::config::Config;
 
+/// Apply `DOCKER_API_VERSION` env var to a [`Command`] when configured.
+fn apply_api_version(cmd: &mut Command, config: &Config) {
+    if let Some(ref ver) = config.docker_api_version {
+        cmd.env("DOCKER_API_VERSION", ver);
+    }
+}
+
 // ── Language → Docker image mapping ────────────────────────────────────────
 
 /// Resolved container settings for a single compilation run.
@@ -151,11 +158,13 @@ pub async fn run_in_container(
     );
 
     // Spawn docker process
-    let child = Command::new("docker")
-        .args(&args)
+    let mut cmd = Command::new("docker");
+    cmd.args(&args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    apply_api_version(&mut cmd, config);
+    let child = cmd
         .spawn()
         .context("Failed to spawn docker process — is the Docker socket mounted?")?;
 
@@ -187,15 +196,16 @@ pub async fn run_in_container(
 ///
 /// This is best-effort: if pulling fails (e.g. offline) we still proceed
 /// because the image may already be cached.
-pub async fn ensure_image(image: &str) -> Result<()> {
+pub async fn ensure_image(config: &Config, image: &str) -> Result<()> {
     // Quick check with `docker image inspect`
-    let inspect = Command::new("docker")
+    let mut inspect_cmd = Command::new("docker");
+    inspect_cmd
         .args(["image", "inspect", image])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .await;
+        .stderr(Stdio::null());
+    apply_api_version(&mut inspect_cmd, config);
+    let inspect = inspect_cmd.status().await;
 
     if let Ok(status) = inspect {
         if status.success() {
@@ -205,11 +215,14 @@ pub async fn ensure_image(image: &str) -> Result<()> {
     }
 
     tracing::info!(image = %image, "Pulling Docker image…");
-    let pull = Command::new("docker")
+    let mut pull_cmd = Command::new("docker");
+    pull_cmd
         .args(["pull", image])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    apply_api_version(&mut pull_cmd, config);
+    let pull = pull_cmd
         .output()
         .await
         .context("Failed to run docker pull")?;

@@ -540,64 +540,64 @@ This ensures no submission is silently lost when binaries are uploaded out of or
 └─────────────────────────────────────────────────────────────────────────────────────────┘
                                            │
                                            ▼
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                            PHASE 3: MINOS (Judge Service)                                │
-│                                                                                          │
-│   1. Consumes job from run_queue (XREADGROUP)                                            │
-│   2. Loads compiled binary from storage                                                  │
-│   3. Gets/generates test cases (lazy generation)                                         │
-│   4. For each test case: spawn sandboxed container, run binary, check output             │
-│   5. Updates verdict in database                                                         │
-│                                                                                          │
-│   ┌─────────────────────────────────────────────────────────────────────────┐           │
-│   │  Test Case Generation (if not cached):                                  │           │
-│   │                                                                         │           │
-│   │  /mnt/data/binaries/problems/{problem_id}/generator                     │           │
-│   │                    │                                                    │           │
-│   │                    ▼                                                    │           │
-│   │  ┌─────────────────────────────────────────────────────────────┐       │           │
-│   │  │  SANDBOXED: ./generator {test_number} > input.txt           │       │           │
-│   │  │  (Network disabled, 60s timeout, 4GB RAM)                   │       │           │
-│   │  └─────────────────────────────────────────────────────────────┘       │           │
-│   │                    │                                                    │           │
-│   │                    ▼                                                    │           │
-│   │  /mnt/data/testcases/{problem_id}/                                      │           │
-│   │  ├── input_001.txt                                                      │           │
-│   │  ├── input_002.txt                                                      │           │
-│   │  ├── ...                                                                │           │
-│   │  └── .last_access   (timestamp for cache invalidation)                  │           │
-│   └─────────────────────────────────────────────────────────────────────────┘           │
-│                                                                                          │
-│   FOR EACH TEST CASE:                                                                    │
-│   ┌─────────────────────────────────────────────────────────────────────────────────┐   │
-│   │                     DOCKER CONTAINER (Sandboxed - STRICT)                       │   │
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                            PHASE 3: MINOS (Judge Service)                              │
+│                                                                                        │
+│   1. Consumes job from run_queue (XREADGROUP)                                          │
+│   2. Loads compiled binary from storage                                                │
+│   3. Gets/generates test cases (lazy generation)                                       │
+│   4. For each test case: spawn sandboxed container, run binary, check output           │
+│   5. Updates verdict in database                                                       │
+│                                                                                        │
+│   ┌─────────────────────────────────────────────────────────────────────────┐          │
+│   │  Test Case Generation (if not cached):                                  │          │
+│   │                                                                         │          │
+│   │  /mnt/data/binaries/problems/{problem_id}/generator                     │          │
+│   │                    │                                                    │          │
+│   │                    ▼                                                    │          │
+│   │  ┌─────────────────────────────────────────────────────────────┐        │          │
+│   │  │  SANDBOXED: ./generator {test_number} > input.txt           │        │          │
+│   │  │  (Network disabled, 60s timeout, 4GB RAM)                   │        │          │
+│   │  └─────────────────────────────────────────────────────────────┘        │          │
+│   │                    │                                                    │          │
+│   │                    ▼                                                    │          │
+│   │  ├── ...                                                                │          │
+│   │  /mnt/data/testcases/{problem_id}/                                      │          │
+│   │  ├── input_001.txt                                                      │          │
+│   │  ├── input_002.txt                                                      │          │
+│   │  └── .last_access   (timestamp for cache invalidation)                  │          │
+│   └─────────────────────────────────────────────────────────────────────────┘          │
+│                                                                                        │
+│   FOR EACH TEST CASE:                                                                  │
+│   ┌────────────────────────────────────────────────────────────────────────────────┐   │
+│   │                     DOCKER CONTAINER (Sandboxed - STRICT)                      │   │
 │   │  ┌─────────────────────────────────────────────────────────────────────────┐   │   │
 │   │  │  Image: olympus-runner:latest (minimal, no compilers)                   │   │   │
 │   │  └─────────────────────────────────────────────────────────────────────────┘   │   │
-│   │                                                                                 │   │
-│   │  Sandbox Settings (STRICTER than compilation):                                  │   │
+│   │                                                                                │   │
+│   │  Sandbox Settings (STRICTER than compilation):                                 │   │
 │   │  ┌─────────────────────────────────────────────────────────────────────────┐   │   │
 │   │  │  --rm                                                                   │   │   │
-│   │  │  --network=none          # NO network (not even loopback!)             │   │   │
-│   │  │  --memory={limit}        # Per-problem memory limit                    │   │   │
-│   │  │  --cpus=1                # Single CPU core                             │   │   │
-│   │  │  --pids-limit=1          # NO forking allowed                          │   │   │
+│   │  │  --network=none          # NO network (not even loopback!)              │   │   │
+│   │  │  --memory={limit}        # Per-problem memory limit                     │   │   │
+│   │  │  --cpus=1                # Single CPU core                              │   │   │
+│   │  │  --pids-limit=1          # NO forking allowed                           │   │   │
 │   │  │  --read-only                                                            │   │   │
 │   │  │  --security-opt=no-new-privileges                                       │   │   │
 │   │  │  --cap-drop=ALL                                                         │   │   │
-│   │  │  --security-opt seccomp=/etc/olympus/seccomp-strict.json               │   │   │
-│   │  │     # Whitelist: read, write, mmap, brk, exit_group                    │   │   │
-│   │  │     # BLOCKED: fork, clone, execve, socket, ptrace, etc.               │   │   │
+│   │  │  --security-opt seccomp=/etc/olympus/seccomp-strict.json                │   │   │
+│   │  │     # Whitelist: read, write, mmap, brk, exit_group                     │   │   │
+│   │  │     # BLOCKED: fork, clone, execve, socket, ptrace, etc.                │   │   │
 │   │  └─────────────────────────────────────────────────────────────────────────┘   │   │
-│   │                                                                                 │   │
-│   │  Volume Mounts:                                                                 │   │
+│   │                                                                                │   │
+│   │  Volume Mounts:                                                                │   │
 │   │  ┌─────────────────────────────────────────────────────────────────────────┐   │   │
 │   │  │  Host                                    Container                      │   │   │
-│   │  │  /mnt/data/binaries/users/{id}_bin  →   /app/solution:ro (read-only)   │   │   │
-│   │  │  /mnt/data/temp/{id}/               →   /sandbox:rw     (scratch)      │   │   │
+│   │  │  /mnt/data/binaries/users/{id}_bin  →   /app/solution:ro (read-only)    │   │   │
+│   │  │  /mnt/data/temp/{id}/               →   /sandbox:rw     (scratch)       │   │   │
 │   │  └─────────────────────────────────────────────────────────────────────────┘   │   │
-│   │                                                                                 │   │
-│   │  Execution Flow:                                                                │   │
+│   │                                                                                │   │
+│   │  Execution Flow:                                                               │   │
 │   │  ┌─────────────────────────────────────────────────────────────────────────┐   │   │
 │   │  │                                                                         │   │   │
 │   │  │   input_001.txt ──────┐                                                 │   │   │
@@ -614,15 +614,15 @@ This ensures no submission is silently lost when binaries are uploaded out of or
 │   │  │   - Exit code                                                           │   │   │
 │   │  │                                                                         │   │   │
 │   │  └─────────────────────────────────────────────────────────────────────────┘   │   │
-│   └─────────────────────────────────────────────────────────────────────────────────┘   │
-│                         │                                                                │
-│                         ▼                                                                │
-│   ┌─────────────────────────────────────────────────────────────────────────────────┐   │
-│   │                     CHECKER CONTAINER (Sandboxed)                               │   │
-│   │                                                                                 │   │
-│   │  /mnt/data/binaries/problems/{problem_id}/checker                               │   │
-│   │                                                                                 │   │
-│   │  Execution:                                                                     │   │
+│   └────────────────────────────────────────────────────────────────────────────────┘   │
+│                         │                                                              │
+│                         ▼                                                              │
+│   ┌────────────────────────────────────────────────────────────────────────────────┐   │
+│   │                     CHECKER CONTAINER (Sandboxed)                              │   │
+│   │                                                                                │   │
+│   │  /mnt/data/binaries/problems/{problem_id}/checker                              │   │
+│   │                                                                                │   │
+│   │  Execution:                                                                    │   │
 │   │  ┌─────────────────────────────────────────────────────────────────────────┐   │   │
 │   │  │  $ ./checker input.txt user_output.txt [expected.txt]                   │   │   │
 │   │  │                                                                         │   │   │
@@ -641,12 +641,12 @@ This ensures no submission is silently lost when binaries are uploaded out of or
 │   │  │  "ok Correct answer: 42"                                                │   │   │
 │   │  │  "wrong answer Expected 42, got 17"                                     │   │   │
 │   │  └─────────────────────────────────────────────────────────────────────────┘   │   │
-│   └─────────────────────────────────────────────────────────────────────────────────┘   │
-│                         │                                                                │
-│                         ▼                                                                │
-│   ┌─────────────────────────────────────────────────────────────────────────┐           │
-│   │  Verdict Determination:                                                 │           │
-│   │                                                                         │           │
+│   └────────────────────────────────────────────────────────────────────────────────┘   │
+│                         │                                                              │
+│                         ▼                                                              │
+│   ┌────────────────────────────────────────────────────────────────────────┐           │
+│   │  Verdict Determination:                                                │           │
+│   │                                                                        │           │
 │   │  ┌─────────────────────────────────────────────────────────────────┐   │           │
 │   │  │  Priority: JE > RE > MLE > TLE > OLE > WA > AC                  │   │           │
 │   │  │                                                                 │   │           │
@@ -657,39 +657,39 @@ This ensures no submission is silently lost when binaries are uploaded out of or
 │   │  │  Score calculation (if all passed):                             │   │           │
 │   │  │  score = 100.0 * (passed_count / total_count)                   │   │           │
 │   │  └─────────────────────────────────────────────────────────────────┘   │           │
-│   └─────────────────────────────────────────────────────────────────────────┘           │
-│                         │                                                                │
-│                         ▼                                                                │
-│   ┌─────────────────────────────────────────────────────────────────────────┐           │
-│   │  Database Updates:                                                      │           │
-│   │                                                                         │           │
-│   │  submissions table:                                                     │           │
-│   │  ┌──────────────┬─────────┬──────────┬─────────────┬─────────┐         │           │
-│   │  │ id           │ status  │ verdict  │ total_time  │ score   │         │           │
-│   │  ├──────────────┼─────────┼──────────┼─────────────┼─────────┤         │           │
-│   │  │ abc-123      │ judged  │ WA       │ 150         │ 40.0    │         │           │
-│   │  └──────────────┴─────────┴──────────┴─────────────┴─────────┘         │           │
-│   │                                                                         │           │
-│   │  submission_results table:                                              │           │
-│   │  ┌──────────────┬─────────┬─────────┬─────────┬──────────┬──────────┐  │           │
-│   │  │ submission   │ tc_num  │ verdict │ time_ms │ mem_kb   │ comment  │  │           │
-│   │  ├──────────────┼─────────┼─────────┼─────────┼──────────┼──────────┤  │           │
-│   │  │ abc-123      │ 1       │ AC      │ 45      │ 12000    │ ok       │  │           │
-│   │  │ abc-123      │ 2       │ AC      │ 52      │ 12100    │ ok       │  │           │
-│   │  │ abc-123      │ 3       │ WA      │ 48      │ 11900    │ wrong... │  │           │
-│   │  └──────────────┴─────────┴─────────┴─────────┴──────────┴──────────┘  │           │
-│   └─────────────────────────────────────────────────────────────────────────┘           │
-│                                                                                          │
-│   Cleanup: rm -rf /mnt/data/temp/{submission_id}/                                       │
-│   XACK run_queue minos_group {message_id}                                               │
-└─────────────────────────────────────────────────────────────────────────────────────────┘
+│   └────────────────────────────────────────────────────────────────────────┘           │
+│                         │                                                              │
+│                         ▼                                                              │
+│   ┌─────────────────────────────────────────────────────────────────────────┐          │
+│   │  Database Updates:                                                      │          │
+│   │                                                                         │          │
+│   │  submissions table:                                                     │          │
+│   │  ┌──────────────┬─────────┬──────────┬─────────────┬─────────┐          │          │
+│   │  │ id           │ status  │ verdict  │ total_time  │ score   │          │          │
+│   │  ├──────────────┼─────────┼──────────┼─────────────┼─────────┤          │          │
+│   │  │ abc-123      │ judged  │ WA       │ 150         │ 40.0    │          │          │
+│   │  └──────────────┴─────────┴──────────┴─────────────┴─────────┘          │          │
+│   │                                                                         │          │
+│   │  submission_results table:                                              │          │
+│   │  ┌──────────────┬─────────┬─────────┬─────────┬──────────┬──────────┐   │          │
+│   │  │ submission   │ tc_num  │ verdict │ time_ms │ mem_kb   │ comment  │   │          │
+│   │  ├──────────────┼─────────┼─────────┼─────────┼──────────┼──────────┤   │          │
+│   │  │ abc-123      │ 1       │ AC      │ 45      │ 12000    │ ok       │   │          │
+│   │  │ abc-123      │ 2       │ AC      │ 52      │ 12100    │ ok       │   │          │
+│   │  │ abc-123      │ 3       │ WA      │ 48      │ 11900    │ wrong... │   │          │
+│   │  └──────────────┴─────────┴─────────┴─────────┴──────────┴──────────┘   │          │
+│   └─────────────────────────────────────────────────────────────────────────┘          │
+│                                                                                        │
+│   Cleanup: rm -rf /mnt/data/temp/{submission_id}/                                      │
+│   XACK run_queue minos_group {message_id}                                              │
+└────────────────────────────────────────────────────────────────────────────────────────┘
                                            │
                                            ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                            PHASE 4: HORUS (Cleaner Service)                              │
-│                                                                                          │
-│   Runs on cron schedules to clean up stale/orphaned files                                │
-│                                                                                          │
+│                            PHASE 4: HORUS (Cleaner Service)                             │
+│                                                                                         │
+│   Runs on cron schedules to clean up stale/orphaned files                               │
+│                                                                                         │
 │   ┌─────────────────────────────────────────────────────────────────────────┐           │
 │   │  Cleanup Policies:                                                      │           │
 │   │                                                                         │           │

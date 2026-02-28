@@ -57,7 +57,7 @@ impl Compiler {
         let spec = resolve_image(&self.config, job.language.as_deref());
 
         // Ensure the image exists locally (pull if needed)
-        ensure_image(&spec.image).await?;
+        ensure_image(&self.config, &spec.image).await?;
 
         // Make compile.sh executable before mounting
         let compile_script = build_dir.join("compile.sh");
@@ -111,7 +111,7 @@ impl Compiler {
 
         // Resolve the container image
         let spec = resolve_image(&self.config, Some(language));
-        ensure_image(&spec.image).await?;
+        ensure_image(&self.config, &spec.image).await?;
 
         // Build a single shell string so we can run it as `sh -c "..."`
         let shell_cmd = compile_cmd.join(" ");
