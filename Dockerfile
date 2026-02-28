@@ -47,12 +47,16 @@ ENV RUST_LOG=sisyphus=info,sqlx=warn
 CMD ["sisyphus"]
 
 # Runtime stage for Minos (Judge)
-FROM debian:bookworm-slim AS minos
+# Needs latest C/C++ runtime libraries because it directly executes
+# uploaded problem binaries (generators/checkers) that may have been
+# compiled with any modern GCC (17+).
+FROM ubuntu:24.04 AS minos
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    libssl3 \
-    && rm -rf /var/lib/apt/lists/*
+    libssl3t64 \
+    g++ \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/minos /usr/local/bin/minos
 

@@ -43,12 +43,12 @@ pub fn resolve_image(config: &Config, language: Option<&str>) -> ContainerSpec {
             .container_images
             .cpp
             .clone()
-            .unwrap_or_else(|| "gcc:14".to_string()),
+            .unwrap_or_else(|| "gcc:latest".to_string()),
         "c" => config
             .container_images
             .c
             .clone()
-            .unwrap_or_else(|| "gcc:14".to_string()),
+            .unwrap_or_else(|| "gcc:latest".to_string()),
         "rust" => config
             .container_images
             .rust
