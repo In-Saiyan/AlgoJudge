@@ -301,6 +301,16 @@ submission.zip
 └── run.sh        # Execution script (required, executable)
 ```
 
+**I/O Convention:** The compiled binary is invoked as `./solution <input_file> <output_file>`.  
+It must read from the file path given as `argv[1]` and write output to the file path given as `argv[2]`.  
+Standard stdin/stdout piping is **not** used.
+
+**Example `run.sh`:**
+```bash
+#!/bin/bash
+./solution "$1" "$2"
+```
+
 **Validation Rules:**
 - Both `compile.sh` and `run.sh` must exist
 - No symlinks pointing outside the archive

@@ -38,8 +38,12 @@ g++ -O2 -std=c++17 -o solution main.cpp
 ### Example `run.sh`
 ```bash
 #!/bin/bash
-./solution
+./solution "$1" "$2"
 ```
+
+> **I/O convention:** Minos invokes the compiled binary as `./solution <input_file> <output_file>`.
+> The binary must read from the input file path (argv[1]) and write to the output file path (argv[2]).
+> Standard stdin/stdout piping is **not** used — this avoids broken-pipe errors with large I/O.
 
 ---
 
@@ -102,8 +106,8 @@ vars.
 
 | Language | Default Image | Override Env Var |
 |----------|---------------|------------------|
-| `cpp` / `c++` | `gcc:14` | `CONTAINER_IMAGE_CPP` |
-| `c` | `gcc:14` | `CONTAINER_IMAGE_C` |
+| `cpp` / `c++` | `gcc:latest` | `CONTAINER_IMAGE_CPP` |
+| `c` | `gcc:latest` | `CONTAINER_IMAGE_C` |
 | `rust` | `rust:1.85-bookworm` | `CONTAINER_IMAGE_RUST` |
 | `go` | `golang:1.23-bookworm` | `CONTAINER_IMAGE_GO` |
 | `python` | `python:3.12-bookworm` | `CONTAINER_IMAGE_PYTHON` |
@@ -145,7 +149,7 @@ $ cd /workspace
 $ chmod +x compile.sh
 $ timeout 30s ./compile.sh
 
-# For a cpp submission the container is gcc:14, so g++ is available:
+# For a cpp submission the container is gcc:latest, so g++ is available:
 #   compile.sh runs: g++ -O2 -std=c++17 -o solution main.cpp
 #   Output: /workspace/solution (compiled binary)
 ```
@@ -157,15 +161,18 @@ $ timeout 30s ./compile.sh
 /mnt/data/binaries/users/{submission_id}_bin
 ```
 
-**Redis Stream Message:**
+**Redis Stream Message (run_queue):**
 ```json
 {
   "submission_id": "abc-123",
-  "problem_id": "prob-456",
-  "time_limit_ms": 2000,
-  "memory_limit_kb": 262144
+  "binary_path": "/mnt/data/binaries/users/abc-123_bin"
 }
 ```
+
+> **Note:** Sisyphus only sends `submission_id` and `binary_path` to the run queue.
+> Minos looks up `problem_id`, `contest_id`, `time_limit_ms`, `memory_limit_kb`, and
+> `num_test_cases` directly from the database by joining `submissions` and `problems`
+> tables. This ensures Minos always uses the latest problem configuration.
 
 **Queue:** `run_queue`
 
@@ -231,13 +238,10 @@ Image: olympus-runner:latest (minimal, no compilers)
 
 **Execution Flow:**
 ```
-input_001.txt ──────┐
-                    ▼
-$ timeout {time_limit}s /app/solution < /sandbox/input.txt \
-                                      > /sandbox/output.txt
-                    │
-                    ▼
-output_001.txt ◄────┘
+$ timeout {time_limit}s /app/solution /sandbox/input.txt /sandbox/output.txt
+
+  The binary reads from the input file (argv[1]) and writes to the output
+  file (argv[2]). No stdin/stdout piping is used.
 
 Metrics captured:
 - Wall clock time (ms)
@@ -290,16 +294,20 @@ score = 100.0 * (passed_count / total_count)
 ### Database Updates
 
 **submissions table:**
-| id | status | verdict | total_time | score |
-|----|--------|---------|------------|-------|
-| abc-123 | judged | WA | 150 | 40.0 |
+| id | status | score | max_time_ms | max_memory_kb | passed_test_cases | total_test_cases |
+|----|--------|-------|-------------|---------------|-------------------|------------------|
+| abc-123 | wrong_answer | 40 | 52 | 12100 | 2 | 5 |
+
+> **Note:** The `status` column holds the verdict value directly (e.g. `accepted`,
+> `wrong_answer`, `time_limit`, `runtime_error`, `system_error`). There is no
+> separate `verdict` column on the `submissions` table.
 
 **submission_results table:**
-| submission | tc_num | verdict | time_ms | mem_kb | comment |
-|------------|--------|---------|---------|--------|---------|
-| abc-123 | 1 | AC | 45 | 12000 | ok |
-| abc-123 | 2 | AC | 52 | 12100 | ok |
-| abc-123 | 3 | WA | 48 | 11900 | wrong... |
+| submission_id | test_case_number | verdict | time_ms | memory_kb | checker_output |
+|---------------|------------------|---------|---------|-----------|----------------|
+| abc-123 | 1 | accepted | 45 | 12000 | ok |
+| abc-123 | 2 | accepted | 52 | 12100 | ok |
+| abc-123 | 3 | wrong_answer | 48 | 11900 | wrong... |
 
 **Cleanup:** `rm -rf /mnt/data/temp/{submission_id}/`
 
@@ -406,15 +414,14 @@ This ensures no submission is silently lost when binaries are uploaded out of or
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  MINOS: Load binary → Generate/cache test cases                             │
 │         FOR EACH TEST:                                                      │
-│           Spawn Docker (--pids-limit=1, seccomp whitelist)                  │
-│           Run: ./solution < input.txt > output.txt                          │
+│           Run: ./solution input.txt output.txt (file args, no piping)       │
 │           Check: ./checker input.txt output.txt                             │
 │         Aggregate verdicts → Update DB                                      │
 └─────────────────────────────────────────────────────────────────────────────┘
                                       │
                                       ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  DATABASE: submissions.verdict = WA, submission_results = [AC, AC, WA, ...] │
+│  DATABASE: submissions.status = wrong_answer, submission_results per TC      │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -431,7 +438,7 @@ This ensures no submission is silently lost when binaries are uploaded out of or
 │   ├── compile.sh      #!/bin/bash                                                        │
 │   │                   g++ -O2 -std=c++17 -o solution main.cpp                           │
 │   ├── run.sh          #!/bin/bash                                                        │
-│   │                   ./solution                                                         │
+│   │                   ./solution "$1" "$2"                                               │
 │   └── main.cpp        #include <iostream> ...                                           │
 │                                                                                          │
 └─────────────────────────────────────────────────────────────────────────────────────────┘
@@ -486,7 +493,7 @@ This ensures no submission is silently lost when binaries are uploaded out of or
 │   │              DOCKER CONTAINER (Language-Specific, Sandboxed)                     │   │
 │   │  ┌─────────────────────────────────────────────────────────────────────────┐   │   │
 │   │  │  Image resolved from language hint:                                     │   │   │
-│   │  │    cpp → gcc:14 │ rust → rust:1.85 │ go → golang:1.23 │ ...            │   │   │
+│   │  │    cpp → gcc:latest │ rust → rust:1.85 │ go → golang:1.23 │ ...         │   │   │
 │   │  │  Pulled lazily and cached locally                                       │   │   │
 │   │  └─────────────────────────────────────────────────────────────────────────┘   │   │
 │   │                                                                                 │   │
@@ -530,10 +537,9 @@ This ensures no submission is silently lost when binaries are uploaded out of or
 │   │  Redis Stream: run_queue                                                │           │
 │   │  {                                                                      │           │
 │   │    "submission_id": "abc-123",                                          │           │
-│   │    "problem_id": "prob-456",                                            │           │
-│   │    "time_limit_ms": 2000,                                               │           │
-│   │    "memory_limit_kb": 262144                                            │           │
+│   │    "binary_path": "/mnt/data/binaries/users/abc-123_bin"                │           │
 │   │  }                                                                      │           │
+│   │  (Minos looks up problem_id, limits, etc. from DB)                      │           │
 │   └─────────────────────────────────────────────────────────────────────────┘           │
 │                                                                                          │
 │   Cleanup: temp build directory removed automatically (tempfile::tempdir)                │
@@ -546,7 +552,7 @@ This ensures no submission is silently lost when binaries are uploaded out of or
 │   1. Consumes job from run_queue (XREADGROUP)                                          │
 │   2. Loads compiled binary from storage                                                │
 │   3. Gets/generates test cases (lazy generation)                                       │
-│   4. For each test case: spawn sandboxed container, run binary, check output           │
+│   4. For each test case: run binary with file args, check output                       │
 │   5. Updates verdict in database                                                       │
 │                                                                                        │
 │   ┌─────────────────────────────────────────────────────────────────────────┐          │
@@ -602,8 +608,8 @@ This ensures no submission is silently lost when binaries are uploaded out of or
 │   │  │                                                                         │   │   │
 │   │  │   input_001.txt ──────┐                                                 │   │   │
 │   │  │                       ▼                                                 │   │   │
-│   │  │   $ timeout {time_limit}s /app/solution < /sandbox/input.txt \          │   │   │
-│   │  │                                         > /sandbox/output.txt           │   │   │
+│   │  │   $ timeout {time_limit}s ./solution input.txt output.txt               │   │   │
+│   │  │     (binary reads from argv[1], writes to argv[2])                      │   │   │
 │   │  │                       │                                                 │   │   │
 │   │  │                       ▼                                                 │   │   │
 │   │  │   output_001.txt ◄────┘                                                 │   │   │
@@ -664,20 +670,20 @@ This ensures no submission is silently lost when binaries are uploaded out of or
 │   │  Database Updates:                                                      │          │
 │   │                                                                         │          │
 │   │  submissions table:                                                     │          │
-│   │  ┌──────────────┬─────────┬──────────┬─────────────┬─────────┐          │          │
-│   │  │ id           │ status  │ verdict  │ total_time  │ score   │          │          │
-│   │  ├──────────────┼─────────┼──────────┼─────────────┼─────────┤          │          │
-│   │  │ abc-123      │ judged  │ WA       │ 150         │ 40.0    │          │          │
-│   │  └──────────────┴─────────┴──────────┴─────────────┴─────────┘          │          │
+│   │  ┌──────────────┬──────────────┬───────┬─────────────┬─────────────────┐ │          │
+│   │  │ id           │ status       │ score │ max_time_ms │ passed_test_cases│ │          │
+│   │  ├──────────────┼──────────────┼───────┼─────────────┼─────────────────┤ │          │
+│   │  │ abc-123      │ wrong_answer │ 40    │ 52          │ 2               │ │          │
+│   │  └──────────────┴──────────────┴───────┴─────────────┴─────────────────┘ │          │
 │   │                                                                         │          │
 │   │  submission_results table:                                              │          │
-│   │  ┌──────────────┬─────────┬─────────┬─────────┬──────────┬──────────┐   │          │
-│   │  │ submission   │ tc_num  │ verdict │ time_ms │ mem_kb   │ comment  │   │          │
-│   │  ├──────────────┼─────────┼─────────┼─────────┼──────────┼──────────┤   │          │
-│   │  │ abc-123      │ 1       │ AC      │ 45      │ 12000    │ ok       │   │          │
-│   │  │ abc-123      │ 2       │ AC      │ 52      │ 12100    │ ok       │   │          │
-│   │  │ abc-123      │ 3       │ WA      │ 48      │ 11900    │ wrong... │   │          │
-│   │  └──────────────┴─────────┴─────────┴─────────┴──────────┴──────────┘   │          │
+│   │  ┌──────────────┬──────────────────┬─────────┬─────────┬──────────────┐  │          │
+│   │  │ submission_id│ test_case_number │ verdict │ time_ms │checker_output│  │          │
+│   │  ├──────────────┼──────────────────┼─────────┼─────────┼──────────────┤  │          │
+│   │  │ abc-123      │ 1                │ AC      │ 45      │ ok           │  │          │
+│   │  │ abc-123      │ 2                │ AC      │ 52      │ ok           │  │          │
+│   │  │ abc-123      │ 3                │ WA      │ 48      │ wrong...     │  │          │
+│   │  └──────────────┴──────────────────┴─────────┴─────────┴──────────────┘  │          │
 │   └─────────────────────────────────────────────────────────────────────────┘          │
 │                                                                                        │
 │   Cleanup: rm -rf /mnt/data/temp/{submission_id}/                                      │

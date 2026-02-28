@@ -214,7 +214,7 @@ This is an incremental implementation roadmap. Complete phases in order. Each ph
 - [x] Create `/mnt/data/temp/{submission_id}/` scratch directory
 - [ ] Setup cgroups for memory/CPU limits
 - [ ] Setup namespaces for network isolation
-- [x] Execute user binary: `./binary < input.txt > output.txt`
+- [x] Execute user binary: `./binary input.txt output.txt` (file args, no stdin/stdout piping)
 - [ ] Capture runtime and memory metrics
 
 #### 5.4 Verdict Specification Rules (olympus-rules)

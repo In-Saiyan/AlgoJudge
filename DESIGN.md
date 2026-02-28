@@ -337,12 +337,12 @@ pub async fn run_sandboxed(
     }
     
     cmd.args([
-        "--", binary_path,
+        "--", binary_path, input_path, output_path,
     ]);
     
-    // Redirect stdin/stdout
-    cmd.stdin(std::fs::File::open(input_path)?);
-    cmd.stdout(std::fs::File::create(output_path)?);
+    // Binary receives input/output file paths as argv[1] and argv[2]
+    // No stdin/stdout piping — avoids broken-pipe errors with large I/O
+    cmd.stdin(std::process::Stdio::null());
     
     // Execute and measure
     let start = std::time::Instant::now();
@@ -473,6 +473,8 @@ This document details the lifecycle of a submission through the four microservic
 **Goal:** Run user binary against test cases in a **strictly isolated** sandbox and verify output.
 
 1.  **Consumer:** Minos reads from Redis Stream (`XREADGROUP minos_group worker_1 run_queue >`).
+    * The stream message only contains `submission_id` and `binary_path`.
+    * Minos looks up `problem_id`, `contest_id`, `time_limit_ms`, `memory_limit_kb`, and `num_test_cases` from the database by joining `submissions` and `problems` tables.
 2.  **Test Case Resolution (Lazy Loading):**
     * Checks `/mnt/data/testcases/{problem_id}/`.
     * **Hit:** Files exist. Updates "Last Accessed" timestamp.
@@ -491,7 +493,7 @@ This document details the lifecycle of a submission through the four microservic
         * **No fork/clone:** Prevents spawning child processes.
         * **No execve:** Cannot execute other binaries.
 4.  **The Run Loop (For each test case):**
-    * **Execute in Sandbox:** `sandbox_run ./user_binary < input.txt > output.txt`
+    * **Execute in Sandbox:** `sandbox_run ./user_binary input.txt output.txt` (file args, no stdin/stdout piping)
     * **Resource Limits:**
         * CPU: Single core, per-problem time limit.
         * RAM: Per-problem memory limit via cgroups.
