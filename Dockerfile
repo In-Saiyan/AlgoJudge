@@ -30,7 +30,7 @@ RUN mkdir -p crates/olympus-common/src && echo "pub fn _dummy(){}" > crates/olym
  && mkdir -p crates/minos/src          && echo "fn main(){}"       > crates/minos/src/main.rs \
  && mkdir -p crates/horus/src          && echo "fn main(){}"       > crates/horus/src/main.rs
 
-RUN cargo build --release --workspace 2>/dev/null || true
+RUN cargo build --release --workspace
 
 # ── Real source build ─────────────────────────────────────────────────
 # Remove the dummy sources and copy the real code.  Only our crates are
@@ -38,7 +38,7 @@ RUN cargo build --release --workspace 2>/dev/null || true
 RUN rm -rf crates/
 COPY crates/ crates/
 
-# Touch all source files so cargo sees them as newer than the dummy artifacts
+# Touch source files so cargo sees them as newer than the dummy artifacts.
 RUN find crates/ -name "*.rs" -exec touch {} +
 
 # Build all binaries in release mode
