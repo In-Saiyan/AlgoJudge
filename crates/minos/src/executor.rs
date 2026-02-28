@@ -283,23 +283,65 @@ impl Executor {
 
         let child = if binary_path.is_dir() {
             // Interpreted language: run.sh inside the directory.
-            // Pass input/output paths as both positional args AND env vars
-            // so the user's script can use either approach:
-            //   - $1 / $2            (positional)
-            //   - $INPUT_FILE / $OUTPUT_FILE  (environment)
+            // Pass input/output paths via env vars AND positional args.
             let run_sh = binary_path.join("run.sh");
-            Command::new("bash")
-                .arg(&run_sh)
-                .arg(input_path)
-                .arg(output_path)
-                .env("INPUT_FILE", input_path)
-                .env("OUTPUT_FILE", output_path)
-                .current_dir(binary_path)
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .kill_on_drop(true)
-                .spawn()?
+            let run_sh_content = fs::read_to_string(&run_sh).await
+                .unwrap_or_default();
+
+            // Check whether run.sh already forwards args to the inner command.
+            let forwards_args = run_sh_content.contains("$1")
+                || run_sh_content.contains("$2")
+                || run_sh_content.contains("$@")
+                || run_sh_content.contains("${1")
+                || run_sh_content.contains("${2")
+                || run_sh_content.contains("INPUT_FILE")
+                || run_sh_content.contains("OUTPUT_FILE");
+
+            if forwards_args {
+                // run.sh handles arg passing — invoke it directly
+                Command::new("bash")
+                    .arg(&run_sh)
+                    .arg(input_path)
+                    .arg(output_path)
+                    .env("INPUT_FILE", input_path)
+                    .env("OUTPUT_FILE", output_path)
+                    .current_dir(binary_path)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .kill_on_drop(true)
+                    .spawn()?
+            } else {
+                // run.sh does NOT forward args (e.g. just `python3 main.py`).
+                // Extract the last non-comment command and append our args so
+                // the inner program receives input/output file paths.
+                let cmd_line = run_sh_content
+                    .lines()
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                    .last()
+                    .unwrap_or("bash run.sh");
+
+                tracing::debug!(
+                    original_cmd = %cmd_line,
+                    "run.sh does not forward args — auto-appending file paths"
+                );
+
+                Command::new("bash")
+                    .arg("-c")
+                    .arg(format!("{} \"$1\" \"$2\"", cmd_line))
+                    .arg("_") // $0 placeholder
+                    .arg(input_path)
+                    .arg(output_path)
+                    .env("INPUT_FILE", input_path)
+                    .env("OUTPUT_FILE", output_path)
+                    .current_dir(binary_path)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .kill_on_drop(true)
+                    .spawn()?
+            }
         } else {
             Command::new(binary_path)
                 .arg(input_path)
