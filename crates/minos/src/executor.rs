@@ -76,10 +76,26 @@ impl Executor {
             .join(ctx.submission_id.to_string());
         fs::create_dir_all(&temp_dir).await?;
 
-        // Ensure binary is executable
-        let mut perms = fs::metadata(&binary_path).await?.permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&binary_path, perms).await?;
+        // Ensure binary (or run.sh for interpreted languages) is executable.
+        // For interpreted languages Sisyphus stores a *directory* containing
+        // run.sh and the source files.
+        let meta = fs::metadata(&binary_path).await?;
+        if meta.is_file() {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&binary_path, perms).await?;
+        } else if meta.is_dir() {
+            let run_sh = binary_path.join("run.sh");
+            if !run_sh.exists() {
+                return Err(anyhow!(
+                    "Interpreted submission directory missing run.sh: {}",
+                    binary_path.display()
+                ));
+            }
+            let mut perms = fs::metadata(&run_sh).await?.permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&run_sh, perms).await?;
+        }
 
         // Get or generate test cases
         let testcases = self
@@ -254,6 +270,10 @@ impl Executor {
     /// The binary is invoked as: `./binary <input_file> <output_file>`
     /// instead of using stdin/stdout piping, which avoids broken-pipe
     /// errors with large I/O.
+    ///
+    /// For interpreted languages the "binary" is a directory containing
+    /// `run.sh` and the source files.  In that case we invoke
+    /// `bash run.sh <input_file> <output_file>` with the directory as cwd.
     async fn execute_sandboxed(
         &self,
         binary_path: &Path,
@@ -265,14 +285,29 @@ impl Executor {
         // For production, this should use proper sandboxing (nsjail, seccomp, cgroups)
         // This is a simplified version that uses basic process isolation
 
-        let child = Command::new(binary_path)
-            .arg(input_path)
-            .arg(output_path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()?;
+        let child = if binary_path.is_dir() {
+            // Interpreted language: run.sh inside the directory
+            let run_sh = binary_path.join("run.sh");
+            Command::new("bash")
+                .arg(&run_sh)
+                .arg(input_path)
+                .arg(output_path)
+                .current_dir(binary_path)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()?
+        } else {
+            Command::new(binary_path)
+                .arg(input_path)
+                .arg(output_path)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()?
+        };
 
         // Wait with timeout
         let time_limit = Duration::from_millis(time_limit_ms + 100); // Add buffer
