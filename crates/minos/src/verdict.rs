@@ -52,33 +52,32 @@ impl Verdict {
         !matches!(self, Verdict::Pending | Verdict::Judging)
     }
 
-    /// Convert to database string representation
+    /// Convert to database string representation (must match CHECK constraints).
     pub fn to_db_string(&self) -> &'static str {
         match self {
-            Verdict::Accepted => "ACCEPTED",
-            Verdict::WrongAnswer => "WRONG_ANSWER",
-            Verdict::TimeLimitExceeded => "TIME_LIMIT_EXCEEDED",
-            Verdict::MemoryLimitExceeded => "MEMORY_LIMIT_EXCEEDED",
-            Verdict::RuntimeError => "RUNTIME_ERROR",
-            Verdict::OutputLimitExceeded => "OUTPUT_LIMIT_EXCEEDED",
-            Verdict::JudgeError => "JUDGE_ERROR",
-            Verdict::Judging => "JUDGING",
-            Verdict::Pending => "PENDING",
+            Verdict::Accepted => "accepted",
+            Verdict::WrongAnswer => "wrong_answer",
+            Verdict::TimeLimitExceeded => "time_limit",
+            Verdict::MemoryLimitExceeded => "memory_limit",
+            Verdict::RuntimeError => "runtime_error",
+            Verdict::OutputLimitExceeded => "runtime_error", // mapped to runtime_error in DB
+            Verdict::JudgeError => "system_error",
+            Verdict::Judging => "judging",
+            Verdict::Pending => "pending",
         }
     }
 
     /// Create from database string
     pub fn from_db_string(s: &str) -> Option<Self> {
         match s {
-            "ACCEPTED" => Some(Verdict::Accepted),
-            "WRONG_ANSWER" => Some(Verdict::WrongAnswer),
-            "TIME_LIMIT_EXCEEDED" => Some(Verdict::TimeLimitExceeded),
-            "MEMORY_LIMIT_EXCEEDED" => Some(Verdict::MemoryLimitExceeded),
-            "RUNTIME_ERROR" => Some(Verdict::RuntimeError),
-            "OUTPUT_LIMIT_EXCEEDED" => Some(Verdict::OutputLimitExceeded),
-            "JUDGE_ERROR" => Some(Verdict::JudgeError),
-            "JUDGING" => Some(Verdict::Judging),
-            "PENDING" => Some(Verdict::Pending),
+            "accepted" => Some(Verdict::Accepted),
+            "wrong_answer" => Some(Verdict::WrongAnswer),
+            "time_limit" => Some(Verdict::TimeLimitExceeded),
+            "memory_limit" => Some(Verdict::MemoryLimitExceeded),
+            "runtime_error" => Some(Verdict::RuntimeError),
+            "system_error" => Some(Verdict::JudgeError),
+            "judging" => Some(Verdict::Judging),
+            "pending" => Some(Verdict::Pending),
             _ => None,
         }
     }

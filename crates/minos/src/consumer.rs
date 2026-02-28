@@ -383,9 +383,9 @@ impl JudgeConsumer {
             return Err(anyhow!("QUEUE_PENDING"));
         }
 
-        // Update status to JUDGING
+        // Update status to judging
         sqlx::query(
-            "UPDATE submissions SET status = 'JUDGING', judged_at = NOW() WHERE id = $1",
+            "UPDATE submissions SET status = 'judging', judged_at = NOW() WHERE id = $1",
         )
         .bind(job.submission_id)
         .execute(&self.db_pool)
@@ -420,17 +420,15 @@ impl JudgeConsumer {
             r#"
             UPDATE submissions 
             SET status = $1, 
-                verdict = $2,
-                score = $3,
-                max_time_ms = $4,
-                max_memory_kb = $5,
-                passed_testcases = $6,
-                total_testcases = $7,
+                score = $2,
+                max_time_ms = $3,
+                max_memory_kb = $4,
+                passed_test_cases = $5,
+                total_test_cases = $6,
                 judged_at = NOW()
-            WHERE id = $8
+            WHERE id = $7
             "#,
         )
-        .bind(result.verdict.to_db_string())
         .bind(result.verdict.to_db_string())
         .bind(result.score)
         .bind(result.max_time_ms as i64)
@@ -446,14 +444,14 @@ impl JudgeConsumer {
             sqlx::query(
                 r#"
                 INSERT INTO submission_results 
-                (submission_id, testcase_number, verdict, time_ms, memory_kb, error_message)
+                (submission_id, test_case_number, verdict, time_ms, memory_kb, checker_output)
                 VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (submission_id, testcase_number) 
+                ON CONFLICT (submission_id, test_case_number) 
                 DO UPDATE SET 
                     verdict = EXCLUDED.verdict,
                     time_ms = EXCLUDED.time_ms,
                     memory_kb = EXCLUDED.memory_kb,
-                    error_message = EXCLUDED.error_message
+                    checker_output = EXCLUDED.checker_output
                 "#,
             )
             .bind(job.submission_id)
@@ -548,13 +546,12 @@ impl JudgeConsumer {
             .query_async::<String>(&mut *conn)
             .await?;
 
-        // Update submission status to JUDGE_ERROR
+        // Update submission status to system_error
         sqlx::query(
             r#"
             UPDATE submissions 
-            SET status = 'JUDGE_ERROR',
-                verdict = 'JUDGE_ERROR',
-                error_message = $1,
+            SET status = 'system_error',
+                compilation_log = $1,
                 judged_at = NOW()
             WHERE id = $2
             "#,
