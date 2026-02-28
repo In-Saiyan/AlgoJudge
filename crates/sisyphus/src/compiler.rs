@@ -53,6 +53,36 @@ impl Compiler {
         // Extract ZIP to build directory
         self.extract_zip(file_path, build_dir).await?;
 
+        // Log extracted directory contents for debugging
+        match tokio::fs::read_dir(build_dir).await {
+            Ok(mut entries) => {
+                let mut names = Vec::new();
+                while let Ok(Some(entry)) = entries.next_entry().await {
+                    let ft = entry.file_type().await.ok();
+                    let kind = match ft {
+                        Some(t) if t.is_dir() => "dir",
+                        Some(t) if t.is_symlink() => "symlink",
+                        _ => "file",
+                    };
+                    names.push(format!("{}({})", entry.file_name().to_string_lossy(), kind));
+                }
+                names.sort();
+                tracing::debug!(
+                    submission_id = %job.submission_id,
+                    build_dir = %build_dir.display(),
+                    contents = %names.join(", "),
+                    "Build directory contents after ZIP extraction"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    submission_id = %job.submission_id,
+                    error = %e,
+                    "Failed to list build directory"
+                );
+            }
+        }
+
         // Resolve the container image from the language hint
         let spec = resolve_image(&self.config, job.language.as_deref());
 

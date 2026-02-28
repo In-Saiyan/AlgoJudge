@@ -98,6 +98,7 @@ services:
       COMPILE_STREAM: compile_queue
       NETWORK_ENABLED: ${NETWORK_ENABLED:-false}
       COMPILATION_TIMEOUT_SECS: ${COMPILATION_TIMEOUT_SECS:-30}
+      DOCKER_API_VERSION: ${DOCKER_API_VERSION:-1.44}
     volumes:
       - olympus_data:/mnt/data
       - /var/run/docker.sock:/var/run/docker.sock
