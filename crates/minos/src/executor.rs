@@ -243,13 +243,21 @@ impl Executor {
                 exit_code,
                 message,
                 memory_kb,
-            } => Ok(TestCaseResult::runtime_error(
-                testcase.number,
-                elapsed_ms,
-                memory_kb,
-                exit_code,
-                message,
-            )),
+            } => {
+                tracing::debug!(
+                    testcase = testcase.number,
+                    exit_code,
+                    %message,
+                    "Runtime error on testcase"
+                );
+                Ok(TestCaseResult::runtime_error(
+                    testcase.number,
+                    elapsed_ms,
+                    memory_kb,
+                    exit_code,
+                    message,
+                ))
+            }
         }
     }
 

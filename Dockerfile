@@ -75,15 +75,17 @@ ENV RUST_LOG=sisyphus=info,sqlx=warn
 CMD ["sisyphus"]
 
 # Runtime stage for Minos (Judge)
-# Needs latest C/C++ runtime libraries because it directly executes
-# uploaded problem binaries (generators/checkers) that may have been
-# compiled with any modern GCC (17+).
+# Needs:
+#   - C/C++ runtime libs for executing uploaded problem binaries (generators/checkers)
+#     that may have been compiled with modern GCC (17+)
+#   - Interpreters for languages that don't produce standalone binaries (Python, etc.)
 FROM ubuntu:24.04 AS minos
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libssl3t64 \
     g++ \
+    python3 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/minos /usr/local/bin/minos
