@@ -1,0 +1,63 @@
+name: Publish Release
+
+# Trigger this workflow only when a tag starting with 'v' is pushed
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+  # Replace 'my_rust_app' with the actual name of your binary in Cargo.toml
+  BIN_NAME: my_rust_app 
+
+jobs:
+  build-and-upload:
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    
+    # The matrix allows you to run the same steps on different operating systems
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset_name: linux-amd64
+            executable_ext: ""
+          - os: macos-latest
+            asset_name: macos-amd64
+            executable_ext: ""
+          - os: windows-latest
+            asset_name: windows-amd64
+            executable_ext: ".exe"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # Cache to speed up the build process
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release
+
+      # Rename the binary so it's clear which OS it belongs to in the release page
+      - name: Rename binary (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: mv target/release/${{ env.BIN_NAME }} target/release/${{ env.BIN_NAME }}-${{ matrix.asset_name }}
+
+      - name: Rename binary (Windows)
+        if: matrix.os == 'windows-latest'
+        run: Rename-Item -Path "target\release\${{ env.BIN_NAME }}.exe" -NewName "${{ env.BIN_NAME }}-${{ matrix.asset_name }}.exe"
+
+      # Upload the renamed binary to the GitHub Release
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/release/${{ env.BIN_NAME }}-${{ matrix.asset_name }}${{ matrix.executable_ext }}
+        env:
+          # GitHub automatically provides this token, no need to set it up manually
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
