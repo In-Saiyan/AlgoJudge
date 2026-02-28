@@ -9,9 +9,37 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy workspace files
+# ── Dependency caching layer ──────────────────────────────────────────
+# Copy only manifests first so that `cargo build` fetches and compiles
+# all third-party crates.  This layer is cached until Cargo.toml/lock
+# change, saving minutes on incremental rebuilds.
 COPY Cargo.toml Cargo.lock ./
+COPY crates/olympus-common/Cargo.toml  crates/olympus-common/Cargo.toml
+COPY crates/olympus-rules/Cargo.toml   crates/olympus-rules/Cargo.toml
+COPY crates/vanguard/Cargo.toml        crates/vanguard/Cargo.toml
+COPY crates/sisyphus/Cargo.toml        crates/sisyphus/Cargo.toml
+COPY crates/minos/Cargo.toml           crates/minos/Cargo.toml
+COPY crates/horus/Cargo.toml           crates/horus/Cargo.toml
+
+# Create dummy source files so cargo can resolve the workspace and
+# compile all dependencies without the real source code.
+RUN mkdir -p crates/olympus-common/src && echo "pub fn _dummy(){}" > crates/olympus-common/src/lib.rs \
+ && mkdir -p crates/olympus-rules/src  && echo "pub fn _dummy(){}" > crates/olympus-rules/src/lib.rs \
+ && mkdir -p crates/vanguard/src       && echo "fn main(){}"       > crates/vanguard/src/main.rs \
+ && mkdir -p crates/sisyphus/src       && echo "fn main(){}"       > crates/sisyphus/src/main.rs \
+ && mkdir -p crates/minos/src          && echo "fn main(){}"       > crates/minos/src/main.rs \
+ && mkdir -p crates/horus/src          && echo "fn main(){}"       > crates/horus/src/main.rs
+
+RUN cargo build --release --workspace 2>/dev/null || true
+
+# ── Real source build ─────────────────────────────────────────────────
+# Remove the dummy sources and copy the real code.  Only our crates are
+# recompiled; all dependencies stay cached from the layer above.
+RUN rm -rf crates/
 COPY crates/ crates/
+
+# Touch all source files so cargo sees them as newer than the dummy artifacts
+RUN find crates/ -name "*.rs" -exec touch {} +
 
 # Build all binaries in release mode
 RUN cargo build --release --workspace
