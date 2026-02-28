@@ -265,7 +265,7 @@ impl Executor {
         // For production, this should use proper sandboxing (nsjail, seccomp, cgroups)
         // This is a simplified version that uses basic process isolation
 
-        let mut child = Command::new(binary_path)
+        let child = Command::new(binary_path)
             .arg(input_path)
             .arg(output_path)
             .stdin(Stdio::null())
