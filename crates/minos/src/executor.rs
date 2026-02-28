@@ -282,12 +282,18 @@ impl Executor {
         // This is a simplified version that uses basic process isolation
 
         let child = if binary_path.is_dir() {
-            // Interpreted language: run.sh inside the directory
+            // Interpreted language: run.sh inside the directory.
+            // Pass input/output paths as both positional args AND env vars
+            // so the user's script can use either approach:
+            //   - $1 / $2            (positional)
+            //   - $INPUT_FILE / $OUTPUT_FILE  (environment)
             let run_sh = binary_path.join("run.sh");
             Command::new("bash")
                 .arg(&run_sh)
                 .arg(input_path)
                 .arg(output_path)
+                .env("INPUT_FILE", input_path)
+                .env("OUTPUT_FILE", output_path)
                 .current_dir(binary_path)
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
@@ -298,6 +304,8 @@ impl Executor {
             Command::new(binary_path)
                 .arg(input_path)
                 .arg(output_path)
+                .env("INPUT_FILE", input_path)
+                .env("OUTPUT_FILE", output_path)
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
