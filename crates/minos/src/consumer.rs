@@ -15,7 +15,7 @@ use crate::executor::{ExecutionContext, Executor};
 use crate::metrics::{self, ACTIVE_JOBS, JOBS_FAILED, JOBS_PROCESSED};
 use crate::verdict::SubmissionResult;
 
-/// Job payload from Redis Stream
+/// Job payload – built from stream message + database lookup.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JudgeJob {
     pub submission_id: Uuid,
@@ -26,6 +26,16 @@ pub struct JudgeJob {
     pub num_testcases: i32,
     #[serde(default)]
     pub retry_count: u32,
+}
+
+/// Row returned by the submission+problem DB lookup.
+#[derive(Debug, sqlx::FromRow)]
+struct SubmissionProblemRow {
+    problem_id: Uuid,
+    contest_id: Option<Uuid>,
+    time_limit_ms: i32,
+    memory_limit_kb: i32,
+    num_test_cases: i32,
 }
 
 /// Judge consumer that processes jobs from Redis Stream
@@ -199,12 +209,16 @@ impl JudgeConsumer {
             return Ok(false);
         }
 
-        // Parse the message
-        let (message_id, job) = self.parse_stream_message(&result)?;
-        
+        // Parse minimal fields from the stream message
+        let (message_id, submission_id, retry_count) = self.parse_stream_message(&result)?;
+
+        // Look up problem_id and limits from the database
+        let job = self.load_job_from_db(submission_id, retry_count).await?;
+
         tracing::info!(
-            "Processing job for submission {} (message: {})",
+            "Processing job for submission {} (problem: {}, message: {})",
             job.submission_id,
+            job.problem_id,
             message_id
         );
 
@@ -264,8 +278,10 @@ impl JudgeConsumer {
         Ok(true)
     }
 
-    /// Parse Redis stream message into JudgeJob
-    fn parse_stream_message(&self, result: &[redis::Value]) -> Result<(String, JudgeJob)> {
+    /// Parse Redis stream message into minimal fields.
+    /// Only `submission_id` is required from the stream; all other job
+    /// metadata is looked up from the database via `load_job_from_db`.
+    fn parse_stream_message(&self, result: &[redis::Value]) -> Result<(String, Uuid, u32)> {
         // XREADGROUP returns: [[stream_name, [[message_id, [field, value, ...]]]]]
         let stream_data = match result.first() {
             Some(redis::Value::Array(data)) => data,
@@ -303,37 +319,44 @@ impl JudgeConsumer {
             }
         }
 
-        let job = JudgeJob {
-            submission_id: field_map
-                .get("submission_id")
-                .ok_or_else(|| anyhow!("Missing submission_id"))?
-                .parse()?,
-            problem_id: field_map
-                .get("problem_id")
-                .ok_or_else(|| anyhow!("Missing problem_id"))?
-                .parse()?,
-            contest_id: field_map
-                .get("contest_id")
-                .and_then(|v| v.parse().ok()),
-            time_limit_ms: field_map
-                .get("time_limit_ms")
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(2000),
-            memory_limit_kb: field_map
-                .get("memory_limit_kb")
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(256 * 1024),
-            num_testcases: field_map
-                .get("num_testcases")
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(10),
-            retry_count: field_map
-                .get("retry_count")
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0),
-        };
+        let submission_id: Uuid = field_map
+            .get("submission_id")
+            .ok_or_else(|| anyhow!("Missing submission_id"))?
+            .parse()?;
 
-        Ok((message_id, job))
+        let retry_count: u32 = field_map
+            .get("retry_count")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+
+        Ok((message_id, submission_id, retry_count))
+    }
+
+    /// Look up submission and problem metadata from the database.
+    async fn load_job_from_db(&self, submission_id: Uuid, retry_count: u32) -> Result<JudgeJob> {
+        let row = sqlx::query_as::<_, SubmissionProblemRow>(
+            r#"
+            SELECT s.problem_id, s.contest_id,
+                   p.time_limit_ms, p.memory_limit_kb, p.num_test_cases
+            FROM submissions s
+            JOIN problems p ON p.id = s.problem_id
+            WHERE s.id = $1
+            "#,
+        )
+        .bind(submission_id)
+        .fetch_optional(&self.db_pool)
+        .await?
+        .ok_or_else(|| anyhow!("Submission {} not found in database", submission_id))?;
+
+        Ok(JudgeJob {
+            submission_id,
+            problem_id: row.problem_id,
+            contest_id: row.contest_id,
+            time_limit_ms: row.time_limit_ms as u64,
+            memory_limit_kb: row.memory_limit_kb as u64,
+            num_testcases: row.num_test_cases,
+            retry_count,
+        })
     }
 
     /// Judge a submission
