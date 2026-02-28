@@ -117,18 +117,6 @@ impl Executor {
 
                     // Stop on first failure (can be made configurable)
                     if failed {
-                        // Fill remaining with "pending" or skip
-                        for remaining in testcases.iter().skip(results.len()) {
-                            results.push(TestCaseResult {
-                                testcase_number: remaining.number,
-                                verdict: Verdict::Pending,
-                                time_ms: 0,
-                                memory_kb: 0,
-                                exit_code: None,
-                                error_message: None,
-                                checker_comment: None,
-                            });
-                        }
                         break;
                     }
                 }
@@ -152,7 +140,7 @@ impl Executor {
             tracing::warn!("Failed to cleanup temp dir: {}", e);
         }
 
-        Ok(SubmissionResult::from_testcases(results))
+        Ok(SubmissionResult::from_testcases(results, testcases.len() as i32))
     }
 
     /// Run a single test case

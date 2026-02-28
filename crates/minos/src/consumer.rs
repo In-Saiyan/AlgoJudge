@@ -13,7 +13,7 @@ use uuid::Uuid;
 use crate::config::Config;
 use crate::executor::{ExecutionContext, Executor};
 use crate::metrics::{self, ACTIVE_JOBS, JOBS_FAILED, JOBS_PROCESSED};
-use crate::verdict::SubmissionResult;
+use crate::verdict::{SubmissionResult, Verdict};
 
 /// Job payload – built from stream message + database lookup.
 #[derive(Debug, Serialize, Deserialize)]
@@ -439,8 +439,11 @@ impl JudgeConsumer {
         .execute(&self.db_pool)
         .await?;
 
-        // Insert individual test case results
+        // Insert individual test case results (skip any Pending placeholders)
         for tc in &result.testcase_results {
+            if tc.verdict == Verdict::Pending {
+                continue;
+            }
             sqlx::query(
                 r#"
                 INSERT INTO submission_results 

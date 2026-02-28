@@ -237,8 +237,7 @@ pub struct SubmissionResult {
 
 impl SubmissionResult {
     /// Create submission result from test case results
-    pub fn from_testcases(results: Vec<TestCaseResult>) -> Self {
-        let total_count = results.len() as i32;
+    pub fn from_testcases(results: Vec<TestCaseResult>, total_count: i32) -> Self {
         let passed_count = results.iter().filter(|r| r.verdict == Verdict::Accepted).count() as i32;
 
         let max_time_ms = results.iter().map(|r| r.time_ms).max().unwrap_or(0);
