@@ -7,7 +7,6 @@ use std::time::Instant;
 
 use anyhow::{anyhow, Result};
 use tokio::fs;
-use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 use uuid::Uuid;
@@ -150,16 +149,13 @@ impl Executor {
     ) -> Result<TestCaseResult> {
         let output_path = temp_dir.join(format!("output_{:03}.txt", testcase.number));
 
-        // Read input file
-        let input_data = fs::read(&testcase.input_path).await?;
-
-        // Execute the binary with resource limits
+        // Execute the binary with file arguments: ./binary <input_file> <output_file>
         let start = Instant::now();
 
         let result = self
             .execute_sandboxed(
                 binary_path,
-                &input_data,
+                &testcase.input_path,
                 &output_path,
                 ctx.time_limit_ms,
                 ctx.memory_limit_kb,
@@ -253,37 +249,30 @@ impl Executor {
         }
     }
 
-    /// Execute binary in sandboxed environment
+    /// Execute binary in sandboxed environment.
+    ///
+    /// The binary is invoked as: `./binary <input_file> <output_file>`
+    /// instead of using stdin/stdout piping, which avoids broken-pipe
+    /// errors with large I/O.
     async fn execute_sandboxed(
         &self,
         binary_path: &Path,
-        input: &[u8],
+        input_path: &Path,
         output_path: &Path,
         time_limit_ms: u64,
         memory_limit_kb: u64,
     ) -> Result<ExecutionResult> {
-        // Create output file
-        let output_file = fs::File::create(output_path).await?;
-
         // For production, this should use proper sandboxing (nsjail, seccomp, cgroups)
         // This is a simplified version that uses basic process isolation
 
-        // Build the command with resource limits
-        // On Linux, we can use `timeout` and `ulimit` for basic limits
         let mut child = Command::new(binary_path)
-            .stdin(Stdio::piped())
-            .stdout(output_file.into_std().await)
+            .arg(input_path)
+            .arg(output_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            // Set memory limit via setrlimit would require more complex setup
-            // For now, rely on timeout for time limit
             .kill_on_drop(true)
             .spawn()?;
-
-        // Write input to stdin
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(input).await?;
-            drop(stdin); // Close stdin to signal EOF
-        }
 
         // Wait with timeout
         let time_limit = Duration::from_millis(time_limit_ms + 100); // Add buffer
