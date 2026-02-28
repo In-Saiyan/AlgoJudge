@@ -89,6 +89,20 @@ impl Compiler {
         // Ensure the image exists locally (pull if needed)
         ensure_image(&self.config, &spec.image).await?;
 
+        // Strip Windows CRLF line-endings from shell scripts so shebangs work
+        // inside Linux containers (e.g. #!/bin/bash\r → not found).
+        for name in &["compile.sh", "run.sh"] {
+            let path = build_dir.join(name);
+            if path.exists() {
+                let content = fs::read(&path).await?;
+                if content.windows(2).any(|w| w == b"\r\n") {
+                    let cleaned: Vec<u8> = content.into_iter().filter(|&b| b != b'\r').collect();
+                    fs::write(&path, &cleaned).await?;
+                    tracing::debug!(file = %name, "Stripped CRLF line endings");
+                }
+            }
+        }
+
         // Make compile.sh executable before mounting
         let compile_script = build_dir.join("compile.sh");
         if !compile_script.exists() {
