@@ -131,6 +131,9 @@ pub async fn run_in_container(
     args.push("--read-only".into());
     // Provide a writable /tmp inside the container for compilers that need it.
     args.push("--tmpfs=/tmp:rw,noexec,nosuid,size=256m".into());
+    // Provide a writable cache directory for toolchains that need it
+    // (e.g. Go writes to /root/.cache/go-build).
+    args.push("--tmpfs=/root/.cache:rw,noexec,nosuid,size=256m".into());
 
     // ── Volume: build directory → /workspace ──────────────
     let build_dir_abs = build_dir
