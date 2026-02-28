@@ -39,9 +39,12 @@ impl Compiler {
         let file_path = job.file_path.as_ref()
             .ok_or_else(|| anyhow!("ZIP submission missing file_path"))?;
 
-        // Create temp directory for build
-        let temp_dir = tempfile::tempdir()
-            .context("Failed to create temp directory")?;
+        // Create temp directory for build under the shared volume so
+        // sibling Docker containers can access it via bind-mount.
+        fs::create_dir_all(&self.config.build_dir_base).await
+            .context("Failed to create build_dir_base")?;
+        let temp_dir = tempfile::tempdir_in(&self.config.build_dir_base)
+            .context("Failed to create temp build directory")?;
         let build_dir = temp_dir.path();
 
         tracing::debug!(
@@ -144,9 +147,11 @@ impl Compiler {
         // Fetch source code from database
         let source_code = self.fetch_source_code(&job.submission_id).await?;
 
-        // Create temp directory for build
-        let temp_dir = tempfile::tempdir()
-            .context("Failed to create temp directory")?;
+        // Create temp directory for build under the shared volume
+        fs::create_dir_all(&self.config.build_dir_base).await
+            .context("Failed to create build_dir_base")?;
+        let temp_dir = tempfile::tempdir_in(&self.config.build_dir_base)
+            .context("Failed to create temp build directory")?;
         let build_dir = temp_dir.path();
 
         // Write source file and determine compile command

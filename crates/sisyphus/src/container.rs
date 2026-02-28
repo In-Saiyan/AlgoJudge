@@ -136,8 +136,30 @@ pub async fn run_in_container(
     let build_dir_abs = build_dir
         .canonicalize()
         .with_context(|| format!("Could not canonicalize {}", build_dir.display()))?;
+
+    // When running as a sibling container (Docker-out-of-Docker), the
+    // bind-mount source path must be expressed as a *host* path.
+    // Translate the container-internal path (e.g. `/mnt/data/temp/builds/...`)
+    // to the host-side volume path (e.g. `/var/lib/docker/volumes/.../...`).
+    let host_build_dir = if let Some(ref host_base) = config.docker_host_data_path {
+        let container_prefix = &config.data_path;
+        let abs_str = build_dir_abs.display().to_string();
+        if let Some(suffix) = abs_str.strip_prefix(container_prefix) {
+            format!("{}{}", host_base, suffix)
+        } else {
+            tracing::warn!(
+                build_dir = %abs_str,
+                container_prefix = %container_prefix,
+                "Build dir not under data_path — using as-is (bind-mount may fail)"
+            );
+            abs_str
+        }
+    } else {
+        build_dir_abs.display().to_string()
+    };
+
     args.push("-v".into());
-    args.push(format!("{}:/workspace", build_dir_abs.display()));
+    args.push(format!("{}:/workspace", host_build_dir));
     args.push("-w".into());
     args.push("/workspace".into());
 

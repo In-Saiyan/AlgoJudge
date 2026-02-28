@@ -55,6 +55,23 @@ pub struct Config {
     /// minimum supported API version (e.g. "1.44").
     /// When `None` the client uses its built-in default.
     pub docker_api_version: Option<String>,
+    /// Base directory for build scratch space.
+    /// Must reside on a volume shared with the Docker host so that
+    /// sibling containers can access it via bind-mount.
+    /// Defaults to `/mnt/data/temp/builds`.
+    pub build_dir_base: String,
+    /// The container-internal mount point for the shared data volume
+    /// (e.g. `/mnt/data`).  Used together with `docker_host_data_path`
+    /// to translate paths for sibling-container bind-mounts.
+    pub data_path: String,
+    /// The **host-side** path of the shared data volume.
+    /// When Sisyphus runs inside Docker and spawns sibling containers,
+    /// bind-mount paths must be expressed relative to the host.
+    /// For named volumes this is typically something like:
+    ///   `/var/lib/docker/volumes/<project>_olympus_data/_data`
+    /// When `None`, paths are passed through as-is (works when
+    /// Sisyphus runs directly on the host, not in a container).
+    pub docker_host_data_path: Option<String>,
 }
 
 impl Config {
@@ -103,6 +120,11 @@ impl Config {
                 generic: env::var("CONTAINER_IMAGE_GENERIC").ok(),
             },
             docker_api_version: env::var("DOCKER_API_VERSION").ok(),
+            build_dir_base: env::var("BUILD_DIR_BASE")
+                .unwrap_or_else(|_| "/mnt/data/temp/builds".to_string()),
+            data_path: env::var("STORAGE_BASE_PATH")
+                .unwrap_or_else(|_| "/mnt/data".to_string()),
+            docker_host_data_path: env::var("DOCKER_HOST_DATA_PATH").ok(),
         }
     }
 }
