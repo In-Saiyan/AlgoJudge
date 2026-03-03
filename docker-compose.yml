@@ -130,6 +130,11 @@ services:
     cap_add:
       - SYS_ADMIN
       - NET_ADMIN
+    # cgroup v2 delegation: mount the host cgroup filesystem so Minos
+    # can create per-sandbox cgroups under /sys/fs/cgroup/minos/.
+    cgroup: host
+    security_opt:
+      - apparmor:unconfined
     ports:
       - "${MINOS_METRICS_PORT:-9091}:9091"
     volumes:
