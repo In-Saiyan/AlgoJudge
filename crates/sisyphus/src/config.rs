@@ -123,7 +123,9 @@ impl Config {
             build_dir_base: env::var("BUILD_DIR_BASE")
                 .unwrap_or_else(|_| "/mnt/data/temp/builds".to_string()),
             data_path: env::var("STORAGE_BASE_PATH").unwrap_or_else(|_| "/mnt/data".to_string()),
-            docker_host_data_path: env::var("DOCKER_HOST_DATA_PATH").ok(),
+            docker_host_data_path: env::var("DOCKER_HOST_DATA_PATH")
+                .ok()
+                .filter(|s| !s.is_empty()),
         }
     }
 }

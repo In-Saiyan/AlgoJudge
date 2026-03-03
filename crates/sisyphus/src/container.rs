@@ -178,6 +178,7 @@ pub async fn run_in_container(
         image = %spec.image,
         language = %spec.language,
         build_dir = %build_dir.display(),
+        host_build_dir = %host_build_dir,
         cmd = ?command,
         "Spawning compilation container"
     );
