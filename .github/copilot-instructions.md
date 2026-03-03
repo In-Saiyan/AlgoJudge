@@ -293,9 +293,8 @@ This is an incremental implementation roadmap. Complete phases in order. Each ph
 - [x] Expose `/health` endpoint
 
 #### 5.9 Known Limitations
-- [ ] ⭐ Generator and checker are NOT sandboxed (run as plain child processes without cgroups/namespaces)
-- [ ] ⭐ No seccomp profile applied to user binaries
-- [ ] ⭐ `generator_memory_limit_kb` and `checker_memory_limit_kb` config values are defined but not enforced
+- [x] ~~Generator and checker are NOT sandboxed~~ — now run inside cgroups v2 sandbox with memory/PID limits and network isolation
+- [ ] ⭐ No seccomp profile applied to user binaries, generators, or checkers
 
 ---
 
@@ -411,7 +410,7 @@ This is an incremental implementation roadmap. Complete phases in order. Each ph
 - [ ] Redis connection pool sizing tuning
 - [ ] Prometheus alerting rules
 - [ ] Grafana dashboards
-- [ ] Sandbox generator/checker binaries (cgroups/namespaces)
+- [x] Sandbox generator/checker binaries (cgroups/namespaces)
 - [ ] Add seccomp profiles for runner sandbox
 - [ ] Implement source code compilation in Sisyphus
 - [ ] Wire PolicyStore into Horus cleanup jobs
@@ -853,10 +852,14 @@ Problems require:
 - Process: `stdin=null`, `kill_on_drop=true`
 - **No seccomp profile** (not yet implemented)
 
-### Generator/Checker — NOT sandboxed
-- Run as direct child processes without cgroup or namespace isolation
-- Timeout enforced (60s for both)
-- **This is a known gap** — problem setter code should be sandboxed
+### Generator/Checker — cgroups v2 + namespaces
+- Network: Disabled via `unshare(CLONE_NEWNET)` (always)
+- Timeout: 60s each (configurable via `GENERATOR_TIME_LIMIT_MS`, `CHECKER_TIME_LIMIT_MS`)
+- Memory: Configurable via cgroups v2 (`GENERATOR_MEMORY_LIMIT_KB` default 4GB, `CHECKER_MEMORY_LIMIT_KB` default 4GB)
+- PIDs: Limited (`pids.max = 5`) via cgroups v2
+- Process: `stdin=null`, `kill_on_drop=true`
+- OOM detection via `memory.events` → `oom_kill` counter
+- **No seccomp profile** (not yet implemented)
 
 ## Testing Guidelines
 
@@ -939,6 +942,6 @@ Problems require:
 - Skip authentication middleware on protected endpoints
 - Store secrets in code (use environment variables)
 - Allow network access in sandboxed execution (unless explicitly configured per-problem)
-- Trust problem setter code (generators/checkers must be sandboxed — **not yet implemented**)
+- Trust problem setter code without the sandbox layer (generators/checkers are sandboxed via cgroups v2 + namespaces)
 - Forget to clean up temp directories after execution
 - Assume source code compilation works (only ZIP submissions are fully supported)

@@ -1,16 +1,19 @@
 //! Test case management - generation and caching
+//!
+//! Generators and checkers are executed inside the same cgroup v2 /
+//! namespace sandbox used for user submissions, enforcing memory limits,
+//! PID limits, network isolation, and hard timeouts.
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 
 use anyhow::{anyhow, Result};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
-use tokio::time::{timeout, Duration};
 use uuid::Uuid;
 
 use crate::config::{ExecutionConfig, StorageConfig};
+use crate::sandbox::Sandbox;
 
 /// Test case input/output pair
 #[derive(Debug, Clone)]
@@ -97,7 +100,11 @@ impl TestCaseManager {
         Ok(testcases)
     }
 
-    /// Generate test cases using the problem's generator
+    /// Generate test cases using the problem's generator.
+    ///
+    /// Each invocation runs the generator binary inside a cgroup v2 sandbox
+    /// with the configured memory limit (`generator_memory_limit_kb`), PID
+    /// limit, and network isolation (always disabled for generators).
     async fn generate_testcases(
         &self,
         problem_id: Uuid,
@@ -113,6 +120,12 @@ impl TestCaseManager {
             return Err(anyhow!("Generator not found for problem {}", problem_id));
         }
 
+        // Ensure the generator binary is executable.
+        let meta = fs::metadata(&generator_path).await?;
+        let mut perms = meta.permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&generator_path, perms).await?;
+
         // Create testcase directory
         let testcase_dir = self.storage.testcases_path.join(problem_id.to_string());
         fs::create_dir_all(&testcase_dir).await?;
@@ -122,22 +135,46 @@ impl TestCaseManager {
         for i in 1..=num_testcases {
             let input_path = testcase_dir.join(format!("input_{:03}.txt", i));
 
-            // Run generator with test case number as argument
-            let output = timeout(
-                Duration::from_millis(self.execution.generator_time_limit_ms),
-                Command::new(&generator_path)
-                    .arg(i.to_string())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .output(),
+            // Create a per-invocation sandbox with generator resource limits.
+            let sandbox_id = format!("gen_{}_{}", problem_id, i);
+            let sandbox = Sandbox::create(
+                &sandbox_id,
+                self.execution.generator_memory_limit_kb,
+                // Generators are single-threaded; small PID buffer.
+                1,
             )
-            .await
-            .map_err(|_| anyhow!("Generator timeout for testcase {}", i))?
-            .map_err(|e| anyhow!("Failed to run generator: {}", e))?;
+            .await;
 
-            if !output.status.success() {
+            let tc_num = i.to_string();
+            let result = sandbox
+                .run_sandboxed(
+                    &generator_path,
+                    &[&tc_num],
+                    self.execution.generator_time_limit_ms,
+                    false, // generators never need network
+                    true,  // capture stdout → test case input
+                )
+                .await;
+
+            sandbox.cleanup().await;
+
+            let output = result.map_err(|e| {
+                anyhow!(
+                    "Generator failed for testcase {} (problem {}): {}",
+                    i,
+                    problem_id,
+                    e
+                )
+            })?;
+
+            if output.exit_code != 0 {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(anyhow!("Generator failed for testcase {}: {}", i, stderr));
+                return Err(anyhow!(
+                    "Generator exited with code {} for testcase {}: {}",
+                    output.exit_code,
+                    i,
+                    stderr
+                ));
             }
 
             // Write input to file
@@ -154,15 +191,22 @@ impl TestCaseManager {
         self.touch_testcase_dir(&testcase_dir).await?;
 
         tracing::info!(
-            "Generated {} test cases for problem {}",
+            "Generated {} test cases for problem {} (sandboxed, mem_limit={}KB)",
             num_testcases,
-            problem_id
+            problem_id,
+            self.execution.generator_memory_limit_kb,
         );
 
         Ok(testcases)
     }
 
-    /// Run the checker to verify output
+    /// Run the checker to verify output.
+    ///
+    /// The checker binary is executed inside a cgroup v2 sandbox with the
+    /// configured memory limit (`checker_memory_limit_kb`), PID limit,
+    /// and network isolation (always disabled for checkers).
+    ///
+    /// Testlib convention: `./checker <input> <output> <answer>`
     pub async fn run_checker(
         &self,
         problem_id: Uuid,
@@ -180,55 +224,79 @@ impl TestCaseManager {
             return Err(anyhow!("Checker not found for problem {}", problem_id));
         }
 
-        // Run checker: checker <input> <output> <answer>
-        // Testlib-style checkers use this convention
-        let result = timeout(
-            Duration::from_millis(self.execution.checker_time_limit_ms),
-            Command::new(&checker_path)
-                .arg(input_path)
-                .arg(output_path)
-                .arg(answer_path)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .output(),
+        // Ensure the checker binary is executable.
+        let meta = fs::metadata(&checker_path).await?;
+        let mut perms = meta.permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&checker_path, perms).await?;
+
+        // Create a sandbox for this checker invocation.
+        let sandbox_id = format!("chk_{}", Uuid::new_v4());
+        let sandbox = Sandbox::create(
+            &sandbox_id,
+            self.execution.checker_memory_limit_kb,
+            // Checkers are single-threaded; small PID buffer.
+            1,
         )
-        .await
-        .map_err(|_| anyhow!("Checker timeout"))?
-        .map_err(|e| anyhow!("Failed to run checker: {}", e))?;
+        .await;
 
-        let stdout = String::from_utf8_lossy(&result.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&result.stderr).to_string();
+        let input_str = input_path.to_string_lossy().to_string();
+        let output_str = output_path.to_string_lossy().to_string();
+        let answer_str = answer_path.to_string_lossy().to_string();
 
-        // Testlib exit codes:
-        // 0 = AC (accepted)
-        // 1 = WA (wrong answer)
-        // 2 = PE (presentation error, treated as WA)
-        // 3 = FAIL (judge error)
-        // 7 = Points (partial credit)
-        match result.status.code() {
-            Some(0) => Ok(CheckerResult::Accepted(stdout)),
-            Some(1) | Some(2) => Ok(CheckerResult::WrongAnswer(if stderr.is_empty() {
-                stdout
-            } else {
-                stderr
-            })),
-            Some(3) => Ok(CheckerResult::JudgeError(stderr)),
-            Some(7) => {
-                // Parse partial points from output
-                let points = stdout
-                    .lines()
-                    .next()
-                    .and_then(|l| l.parse::<f64>().ok())
-                    .unwrap_or(0.0);
-                Ok(CheckerResult::PartialCredit(points, stdout))
+        let result = sandbox
+            .run_sandboxed(
+                &checker_path,
+                &[&input_str, &output_str, &answer_str],
+                self.execution.checker_time_limit_ms,
+                false, // checkers never need network
+                true,  // capture stdout for checker messages
+            )
+            .await;
+
+        sandbox.cleanup().await;
+
+        match result {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+                // Testlib exit codes:
+                // 0 = AC (accepted)
+                // 1 = WA (wrong answer)
+                // 2 = PE (presentation error, treated as WA)
+                // 3 = FAIL (judge error)
+                // 7 = Points (partial credit)
+                match output.exit_code {
+                    0 => Ok(CheckerResult::Accepted(stdout)),
+                    1 | 2 => Ok(CheckerResult::WrongAnswer(if stderr.is_empty() {
+                        stdout
+                    } else {
+                        stderr
+                    })),
+                    3 => Ok(CheckerResult::JudgeError(stderr)),
+                    7 => {
+                        // Parse partial points from output
+                        let points = stdout
+                            .lines()
+                            .next()
+                            .and_then(|l| l.parse::<f64>().ok())
+                            .unwrap_or(0.0);
+                        Ok(CheckerResult::PartialCredit(points, stdout))
+                    }
+                    code => Ok(CheckerResult::JudgeError(format!(
+                        "Checker exited with code {}: {}",
+                        code, stderr
+                    ))),
+                }
             }
-            Some(code) => Ok(CheckerResult::JudgeError(format!(
-                "Checker exited with code {}: {}",
-                code, stderr
-            ))),
-            None => Ok(CheckerResult::JudgeError(
-                "Checker terminated by signal".to_string(),
-            )),
+            Err(e) => {
+                // Sandbox-level failure (timeout, OOM, spawn error)
+                Ok(CheckerResult::JudgeError(format!(
+                    "Checker sandbox error: {}",
+                    e
+                )))
+            }
         }
     }
 }

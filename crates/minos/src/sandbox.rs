@@ -1,13 +1,17 @@
 //! Sandboxing via cgroups v2 and Linux namespaces.
 //!
-//! Provides resource isolation (memory, CPU, PIDs) for user submissions.
-//! When cgroups v2 are unavailable (e.g. inside unprivileged containers),
-//! falls back to reading `/proc/{pid}/status` for memory metrics.
+//! Provides resource isolation (memory, CPU, PIDs) for user submissions,
+//! generators, and checkers. When cgroups v2 are unavailable (e.g. inside
+//! unprivileged containers), falls back to reading `/proc/{pid}/status`
+//! for memory metrics.
 
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use tokio::fs;
+use tokio::process::Command;
+use tokio::time::{timeout, Duration};
 
 /// Base path for cgroup v2 hierarchy used by Minos.
 const CGROUP_BASE: &str = "/sys/fs/cgroup/minos";
@@ -203,6 +207,122 @@ impl Sandbox {
     }
 
     // ------------------------------------------------------------------
+    // Sandboxed binary execution
+    // ------------------------------------------------------------------
+
+    /// Execute a binary inside this sandbox with full cgroup + namespace
+    /// isolation, timeout enforcement, and OOM detection.
+    ///
+    /// Returns `(stdout, stderr, exit_code, memory_kb)` on success.
+    /// Returns an error on timeout, spawn failure, or OOM kill.
+    ///
+    /// ## Isolation applied
+    ///
+    /// * **cgroups v2** – process is joined to this sandbox's cgroup
+    ///   before exec so memory/PID limits are enforced immediately.
+    /// * **Network namespace** – `unshare(CLONE_NEWNET)` isolates from
+    ///   all network interfaces when `network_allowed` is `false`.
+    /// * **Process** – stdin is `/dev/null`, `kill_on_drop` ensures
+    ///   cleanup if the future is cancelled.
+    pub async fn run_sandboxed(
+        &self,
+        binary_path: &Path,
+        args: &[&str],
+        time_limit_ms: u64,
+        network_allowed: bool,
+        capture_stdout: bool,
+    ) -> Result<SandboxedOutput> {
+        let mut cmd = Command::new(binary_path);
+        for arg in args {
+            cmd.arg(arg);
+        }
+
+        cmd.stdin(Stdio::null())
+            .stdout(if capture_stdout {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+
+        // Pre-exec: join cgroup
+        if let Some(procs_path) = self.cgroup_procs_path() {
+            unsafe {
+                cmd.pre_exec(move || {
+                    std::fs::write(&procs_path, std::process::id().to_string())?;
+                    Ok(())
+                });
+            }
+        }
+
+        // Pre-exec: network namespace isolation
+        if !network_allowed {
+            unsafe {
+                cmd.pre_exec(|| {
+                    match nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWNET) {
+                        Ok(()) => {}
+                        Err(_e) => {
+                            eprintln!(
+                                "[minos] WARNING: unshare(CLONE_NEWNET) failed — \
+                                 process will run without network isolation"
+                            );
+                        }
+                    }
+                    Ok(())
+                });
+            }
+        }
+
+        // Spawn & wait with timeout (+ 100ms buffer)
+        let child = cmd.spawn().context("failed to spawn sandboxed process")?;
+        let child_pid = child.id();
+        let hard_limit = Duration::from_millis(time_limit_ms.saturating_add(100));
+        let result = timeout(hard_limit, child.wait_with_output()).await;
+
+        // Collect metrics
+        let usage = self.read_usage(child_pid).await;
+        let oom_killed = self.was_oom_killed().await;
+
+        match result {
+            Ok(Ok(output)) => {
+                // Check OOM / signal kills
+                #[cfg(unix)]
+                {
+                    use std::os::unix::process::ExitStatusExt;
+                    if let Some(signal) = output.status.signal() {
+                        if signal == 9 && (oom_killed || usage.memory_kb > 0) {
+                            return Err(anyhow!(
+                                "Process killed by OOM (signal {}, peak memory {}KB)",
+                                signal,
+                                usage.memory_kb
+                            ));
+                        }
+                        return Err(anyhow!(
+                            "Process killed by signal {} (peak memory {}KB)",
+                            signal,
+                            usage.memory_kb
+                        ));
+                    }
+                }
+
+                Ok(SandboxedOutput {
+                    stdout: output.stdout,
+                    stderr: output.stderr,
+                    exit_code: output.status.code().unwrap_or(-1),
+                    memory_kb: usage.memory_kb,
+                    oom_killed,
+                })
+            }
+            Ok(Err(e)) => Err(anyhow!("Failed to execute sandboxed process: {}", e)),
+            Err(_) => Err(anyhow!(
+                "Process exceeded time limit ({}ms)",
+                time_limit_ms
+            )),
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Cleanup
     // ------------------------------------------------------------------
 
@@ -222,4 +342,19 @@ impl Sandbox {
             );
         }
     }
+}
+
+/// Output captured from a sandboxed process execution.
+#[derive(Debug)]
+pub struct SandboxedOutput {
+    /// Captured stdout bytes.
+    pub stdout: Vec<u8>,
+    /// Captured stderr bytes.
+    pub stderr: Vec<u8>,
+    /// Process exit code (`-1` if unavailable).
+    pub exit_code: i32,
+    /// Peak memory usage in KB (from cgroup or `/proc`).
+    pub memory_kb: u64,
+    /// Whether the process was killed by the cgroup OOM killer.
+    pub oom_killed: bool,
 }

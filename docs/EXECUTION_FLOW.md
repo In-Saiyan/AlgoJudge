@@ -556,12 +556,12 @@ pending → compiling → compiled → judging → {verdict}
 |---------|-----------|---------|--------|-----|----------|----------|
 | **Compiler** | Docker container | Disabled (--network=none) | 2GB | 2 cores | Limited (256 PIDs) | Filtered (cap-drop ALL) |
 | **Runner** | cgroups v2 + namespaces | Disabled (CLONE_NEWNET) | Per-problem | Per-problem threads | `max_threads + 4` | Not restricted (no seccomp) |
-| **Generator** | Direct process | Not isolated | Not limited | Not limited | Not limited | Not restricted |
-| **Checker** | Direct process | Not isolated | Not limited | Not limited | Not limited | Not restricted |
+| **Generator** | cgroups v2 + namespaces | Disabled (CLONE_NEWNET) | 4GB default (configurable) | Not limited | 5 PIDs | Not restricted (no seccomp) |
+| **Checker** | cgroups v2 + namespaces | Disabled (CLONE_NEWNET) | 4GB default (configurable) | Not limited | 5 PIDs | Not restricted (no seccomp) |
 
-> **Known gaps:** Generator and checker processes are not sandboxed. The design
-> spec calls for cgroup/namespace isolation of untrusted problem-setter code,
-> but this is not yet implemented.
+> **Remaining gap:** No seccomp profile is applied to user binaries, generators,
+> or checkers. All other resource limits are enforced via cgroups v2 and
+> network namespaces.
 
 ---
 
