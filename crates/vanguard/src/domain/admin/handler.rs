@@ -50,22 +50,32 @@ pub async fn admin_list_users(
 
     // Build dynamic query
     let mut conditions = vec!["1=1".to_string()];
-    let mut bind_idx = 3u32; // $1 = limit, $2 = offset
+    let mut data_bind_idx = 3u32; // $1 = limit, $2 = offset for data query
+    let mut count_bind_idx = 1u32; // count query has no limit/offset
 
     if query.role.is_some() {
-        conditions.push(format!("role = ${}", bind_idx));
-        bind_idx += 1;
+        conditions.push(format!(
+            "role = ${data}",
+            data = data_bind_idx
+        ));
+        data_bind_idx += 1;
+        count_bind_idx += 1;
     }
     if query.is_banned.is_some() {
-        conditions.push(format!("is_banned = ${}", bind_idx));
-        bind_idx += 1;
+        conditions.push(format!(
+            "is_banned = ${data}",
+            data = data_bind_idx
+        ));
+        data_bind_idx += 1;
+        count_bind_idx += 1;
     }
     if query.search.is_some() {
         conditions.push(format!(
-            "(username ILIKE ${bind} OR email ILIKE ${bind})",
-            bind = bind_idx
+            "(username ILIKE ${data} OR email ILIKE ${data})",
+            data = data_bind_idx
         ));
-        // bind_idx += 1; // not needed after this
+        // data_bind_idx += 1;
+        // count_bind_idx += 1;
     }
 
     let where_clause = conditions.join(" AND ");
@@ -74,7 +84,27 @@ pub async fn admin_list_users(
          FROM users WHERE {} ORDER BY created_at DESC LIMIT $1 OFFSET $2",
         where_clause
     );
-    let count_sql = format!("SELECT COUNT(*) as count FROM users WHERE {}", where_clause);
+
+    // Count query uses $1, $2, ... (no limit/offset)
+    let count_where = {
+        let mut conds = vec!["1=1".to_string()];
+        let mut ci = 1u32;
+        if query.role.is_some() {
+            conds.push(format!("role = ${ci}"));
+            ci += 1;
+        }
+        if query.is_banned.is_some() {
+            conds.push(format!("is_banned = ${ci}"));
+            ci += 1;
+        }
+        if query.search.is_some() {
+            conds.push(format!(
+                "(username ILIKE ${ci} OR email ILIKE ${ci})"
+            ));
+        }
+        conds.join(" AND ")
+    };
+    let count_sql = format!("SELECT COUNT(*) FROM users WHERE {}", count_where);
 
     // Build and execute query with dynamic binds
     let mut q = sqlx::query_as::<_, AdminUserRow>(&sql)
@@ -288,6 +318,13 @@ struct BanRow {
 // 7.2 System Management
 // =============================================================================
 
+/// Row type for role count aggregation
+#[derive(Debug, FromRow)]
+struct RoleCountRow {
+    role: String,
+    count: i64,
+}
+
 /// GET /api/v1/admin/stats
 ///
 /// System-wide statistics dashboard.
@@ -300,28 +337,31 @@ pub async fn system_stats(State(state): State<AppState>) -> ApiResult<Json<Syste
         .fetch_one(&state.db)
         .await?;
 
-    let role_counts: Vec<(String, i64)> = sqlx::query_as(
+    let role_counts: Vec<RoleCountRow> = sqlx::query_as(
         "SELECT role, COUNT(*) as count FROM users GROUP BY role ORDER BY count DESC",
     )
     .fetch_all(&state.db)
     .await?;
 
-    // Contest stats
+    // Contest stats (derived from start_time / end_time, no status column)
     let total_contests: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM contests")
         .fetch_one(&state.db)
         .await?;
-    let active_contests: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM contests WHERE status = 'active'")
-            .fetch_one(&state.db)
-            .await?;
-    let draft_contests: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM contests WHERE status = 'draft'")
-            .fetch_one(&state.db)
-            .await?;
-    let finished_contests: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM contests WHERE status = 'finished'")
-            .fetch_one(&state.db)
-            .await?;
+    let active_contests: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM contests WHERE start_time <= NOW() AND end_time > NOW()",
+    )
+    .fetch_one(&state.db)
+    .await?;
+    let draft_contests: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM contests WHERE start_time > NOW()",
+    )
+    .fetch_one(&state.db)
+    .await?;
+    let finished_contests: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM contests WHERE end_time <= NOW()",
+    )
+    .fetch_one(&state.db)
+    .await?;
 
     // Submission stats
     let total_submissions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM submissions")
@@ -358,7 +398,7 @@ pub async fn system_stats(State(state): State<AppState>) -> ApiResult<Json<Syste
             banned: banned_users,
             by_role: role_counts
                 .into_iter()
-                .map(|(role, count)| RoleCount { role, count })
+                .map(|r| RoleCount { role: r.role, count: r.count })
                 .collect(),
         },
         contests: ContestStats {

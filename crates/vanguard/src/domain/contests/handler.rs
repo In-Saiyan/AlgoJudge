@@ -65,12 +65,29 @@ fn get_contest_status(start_time: DateTime<Utc>, end_time: DateTime<Utc>) -> Str
 // Contest CRUD
 // =============================================================================
 
+/// Database row for contest list query
+#[derive(Debug, FromRow)]
+struct ContestListRow {
+    id: Uuid,
+    title: String,
+    short_description: Option<String>,
+    start_time: DateTime<Utc>,
+    end_time: DateTime<Utc>,
+    scoring_type: String,
+    is_public: bool,
+    is_rated: bool,
+    owner_id: Uuid,
+    owner_username: String,
+    owner_display_name: Option<String>,
+    participant_count: i64,
+}
+
 /// GET /api/v1/contests
 ///
 /// List contests with pagination and filtering.
 pub async fn list_contests(
     State(state): State<AppState>,
-    user: Option<Extension<AuthUser>>,
+    _user: Option<Extension<AuthUser>>,
     Query(query): Query<ListContestsQuery>,
 ) -> ApiResult<Json<ContestListResponse>> {
     let page = query.page.max(1);
@@ -78,39 +95,80 @@ pub async fn list_contests(
     let offset = ((page - 1) * per_page) as i64;
     let now = Utc::now();
 
-    // Build the base query with status filtering
-    let status_filter = match query.status.as_deref() {
-        Some("upcoming") => "AND c.start_time > $3",
-        Some("ongoing") => "AND c.start_time <= $3 AND c.end_time >= $3",
-        Some("past") => "AND c.end_time < $3",
-        _ => "",
-    };
+    // Build dynamic WHERE conditions with proper parameter numbering.
+    // Data query: $1 = limit, $2 = offset, then $3+ for filters.
+    // Count query: $1+ for filters (no limit/offset).
+    let mut data_conditions = Vec::new();
+    let mut count_conditions = Vec::new();
+    let mut data_idx = 3u32;
+    let mut count_idx = 1u32;
 
-    let visibility_filter = if query.public_only {
-        "AND c.is_public = true"
-    } else {
-        ""
-    };
+    // Visibility filter (literal — no bind parameter needed)
+    if query.public_only {
+        data_conditions.push("c.is_public = true".to_string());
+        count_conditions.push("c.is_public = true".to_string());
+    }
 
-    let search_filter = if query.search.is_some() {
-        "AND c.title ILIKE $4"
-    } else {
-        ""
-    };
-
-    let owner_filter = if query.owner_id.is_some() {
-        if query.search.is_some() {
-            "AND c.owner_id = $5"
-        } else {
-            "AND c.owner_id = $4"
+    // Status filter (binds `now`)
+    let has_status = match query.status.as_deref() {
+        Some("upcoming") => {
+            data_conditions.push(format!("c.start_time > ${data_idx}"));
+            count_conditions.push(format!("c.start_time > ${count_idx}"));
+            data_idx += 1;
+            count_idx += 1;
+            true
         }
+        Some("ongoing") => {
+            data_conditions.push(format!(
+                "c.start_time <= ${data_idx} AND c.end_time >= ${data_idx}"
+            ));
+            count_conditions.push(format!(
+                "c.start_time <= ${count_idx} AND c.end_time >= ${count_idx}"
+            ));
+            data_idx += 1;
+            count_idx += 1;
+            true
+        }
+        Some("past") => {
+            data_conditions.push(format!("c.end_time < ${data_idx}"));
+            count_conditions.push(format!("c.end_time < ${count_idx}"));
+            data_idx += 1;
+            count_idx += 1;
+            true
+        }
+        _ => false,
+    };
+
+    // Search filter (binds search pattern)
+    if query.search.is_some() {
+        data_conditions.push(format!("c.title ILIKE ${data_idx}"));
+        count_conditions.push(format!("c.title ILIKE ${count_idx}"));
+        data_idx += 1;
+        count_idx += 1;
+    }
+
+    // Owner filter (binds owner_id)
+    if query.owner_id.is_some() {
+        data_conditions.push(format!("c.owner_id = ${data_idx}"));
+        count_conditions.push(format!("c.owner_id = ${count_idx}"));
+        // data_idx += 1; count_idx += 1; // last filter, no need to increment
+    }
+
+    let data_where = if data_conditions.is_empty() {
+        "1=1".to_string()
     } else {
-        ""
+        data_conditions.join(" AND ")
+    };
+
+    let count_where = if count_conditions.is_empty() {
+        "1=1".to_string()
+    } else {
+        count_conditions.join(" AND ")
     };
 
     let sql = format!(
         r#"
-        SELECT 
+        SELECT
             c.id, c.title, c.short_description, c.start_time, c.end_time,
             c.scoring_type, c.is_public, c.is_rated,
             u.id as owner_id, u.username as owner_username, u.display_name as owner_display_name,
@@ -122,139 +180,74 @@ pub async fn list_contests(
             FROM contest_participants
             GROUP BY contest_id
         ) p ON c.id = p.contest_id
-        WHERE 1=1 {} {} {} {}
+        WHERE {data_where}
         ORDER BY c.start_time DESC
         LIMIT $1 OFFSET $2
-        "#,
-        visibility_filter, status_filter, search_filter, owner_filter
+        "#
     );
 
-    let count_sql = format!(
-        r#"
-        SELECT COUNT(*) as count
-        FROM contests c
-        WHERE 1=1 {} {} {} {}
-        "#,
-        visibility_filter, status_filter, search_filter, owner_filter
-    );
+    let count_sql = format!("SELECT COUNT(*) FROM contests c WHERE {count_where}");
 
-    // Execute queries based on parameters
-    let search_pattern = query.search.as_ref().map(|s| format!("%{}%", s));
+    // Build queries with base binds
+    let mut q = sqlx::query_as::<_, ContestListRow>(&sql)
+        .bind(per_page as i64)
+        .bind(offset);
+    let mut cq = sqlx::query_scalar::<_, i64>(&count_sql);
 
-    let rows: Vec<(
-        Uuid,
-        String,
-        Option<String>,
-        DateTime<Utc>,
-        DateTime<Utc>,
-        String,
-        bool,
-        bool,
-        Uuid,
-        String,
-        Option<String>,
-        i64,
-    )> = match (&query.status, &search_pattern, &query.owner_id) {
-        (Some(_), Some(search), Some(owner)) => sqlx::query_as(&sql)
-            .bind(per_page as i64)
-            .bind(offset)
-            .bind(now)
-            .bind(search)
-            .bind(owner)
-            .fetch_all(&state.db)
-            .await
-            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?,
-        (Some(_), Some(search), None) => sqlx::query_as(&sql)
-            .bind(per_page as i64)
-            .bind(offset)
-            .bind(now)
-            .bind(search)
-            .fetch_all(&state.db)
-            .await
-            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?,
-        (Some(_), None, Some(owner)) => sqlx::query_as(&sql)
-            .bind(per_page as i64)
-            .bind(offset)
-            .bind(now)
-            .bind(owner)
-            .fetch_all(&state.db)
-            .await
-            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?,
-        (Some(_), None, None) => sqlx::query_as(&sql)
-            .bind(per_page as i64)
-            .bind(offset)
-            .bind(now)
-            .fetch_all(&state.db)
-            .await
-            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?,
-        (None, Some(search), Some(owner)) => sqlx::query_as(&sql)
-            .bind(per_page as i64)
-            .bind(offset)
-            .bind(search)
-            .bind(owner)
-            .fetch_all(&state.db)
-            .await
-            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?,
-        (None, Some(search), None) => sqlx::query_as(&sql)
-            .bind(per_page as i64)
-            .bind(offset)
-            .bind(search)
-            .fetch_all(&state.db)
-            .await
-            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?,
-        (None, None, Some(owner)) => sqlx::query_as(&sql)
-            .bind(per_page as i64)
-            .bind(offset)
-            .bind(owner)
-            .fetch_all(&state.db)
-            .await
-            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?,
-        (None, None, None) => sqlx::query_as(&sql)
-            .bind(per_page as i64)
-            .bind(offset)
-            .fetch_all(&state.db)
-            .await
-            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?,
-    };
+    // Bind optional filter values in the same order as the conditions above
+    if has_status {
+        q = q.bind(now);
+        cq = cq.bind(now);
+    }
+    if let Some(ref search) = query.search {
+        let pattern = format!("%{search}%");
+        q = q.bind(pattern.clone());
+        cq = cq.bind(pattern);
+    }
+    if let Some(owner_id) = query.owner_id {
+        q = q.bind(owner_id);
+        cq = cq.bind(owner_id);
+    }
 
-    // Get total count (simplified - just count with visibility filter)
-    let total: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM contests WHERE is_public = true OR $1::boolean = false",
-    )
-    .bind(query.public_only)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+    let rows = q
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+
+    let total: i64 = cq
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Count query error: {}", e)))?;
 
     let contests: Vec<ContestSummary> = rows
         .into_iter()
-        .map(|row| ContestSummary {
-            id: row.0,
-            title: row.1,
-            short_description: row.2,
-            start_time: row.3,
-            end_time: row.4,
-            scoring_type: row.5,
-            is_public: row.6,
-            is_rated: row.7,
-            participant_count: row.11,
+        .map(|r| ContestSummary {
+            id: r.id,
+            title: r.title,
+            short_description: r.short_description,
+            start_time: r.start_time,
+            end_time: r.end_time,
+            scoring_type: r.scoring_type,
+            is_public: r.is_public,
+            is_rated: r.is_rated,
+            participant_count: r.participant_count,
             owner: OwnerInfo {
-                id: row.8,
-                username: row.9,
-                display_name: row.10,
+                id: r.owner_id,
+                username: r.owner_username,
+                display_name: r.owner_display_name,
             },
-            status: get_contest_status(row.3, row.4),
+            status: get_contest_status(r.start_time, r.end_time),
         })
         .collect();
 
-    let total_pages = ((total.0 as f64) / (per_page as f64)).ceil() as u32;
+    let total_pages = ((total as f64) / (per_page as f64)).ceil() as u32;
 
     Ok(Json(ContestListResponse {
         contests,
         pagination: Pagination {
             page,
             per_page,
-            total: total.0,
+            total,
             total_pages,
         },
     }))
