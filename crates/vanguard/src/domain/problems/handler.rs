@@ -61,97 +61,165 @@ struct ProblemRow {
 /// GET /api/v1/problems
 ///
 /// List problems with pagination and filtering.
+/// Database row for problem list query
+#[derive(Debug, FromRow)]
+struct ProblemListRow {
+    id: Uuid,
+    title: String,
+    difficulty: Option<String>,
+    tags: Option<Vec<String>>,
+    time_limit_ms: i32,
+    memory_limit_kb: i32,
+    max_threads: i32,
+    network_allowed: bool,
+    max_score: i32,
+    is_public: bool,
+    created_at: DateTime<Utc>,
+    owner_id: Uuid,
+    owner_username: String,
+    owner_display_name: Option<String>,
+}
+
 pub async fn list_problems(
     State(state): State<AppState>,
-    _user: Option<Extension<AuthUser>>,
+    user: Option<Extension<AuthUser>>,
     Query(query): Query<ListProblemsQuery>,
 ) -> ApiResult<Json<ProblemListResponse>> {
     let page = query.page.max(1);
     let per_page = query.per_page.clamp(1, 100);
     let offset = ((page - 1) * per_page) as i64;
 
-    let visibility_filter = if query.public_only {
-        "AND p.is_public = true"
+    let user_id = user.as_ref().map(|u| u.id);
+    let user_role = user.as_ref().map(|u| u.role.as_str());
+    let is_admin = user_role == Some("admin");
+
+    // Visibility logic:
+    //   public_only=true  -> only public problems (anyone)
+    //   public_only=false -> public problems PLUS non-public problems the user can access:
+    //     - admin sees all
+    //     - problem owner sees their own
+    //     - contest owner / collaborator sees problems in their contests
+    let (visibility_filter, needs_user_bind) = if query.public_only {
+        ("AND p.is_public = true".to_string(), false)
+    } else if is_admin {
+        // Admin sees everything
+        (String::new(), false)
+    } else if let Some(_uid) = user_id {
+        // Authenticated non-admin: public OR owned OR in a contest they own/collaborate on
+        let filter = r#"AND (
+                p.is_public = true
+                OR p.owner_id = $3
+                OR EXISTS (
+                    SELECT 1 FROM contest_problems cp
+                    JOIN contests c ON c.id = cp.contest_id
+                    WHERE cp.problem_id = p.id AND c.owner_id = $3
+                )
+                OR EXISTS (
+                    SELECT 1 FROM contest_problems cp
+                    JOIN contest_collaborators cc ON cc.contest_id = cp.contest_id
+                    WHERE cp.problem_id = p.id AND cc.user_id = $3
+                )
+            )"#;
+        (filter.to_string(), true)
     } else {
-        ""
+        // Anonymous: only public
+        ("AND p.is_public = true".to_string(), false)
     };
 
     let sql = format!(
         r#"
-        SELECT 
+        SELECT
             p.id, p.title, p.difficulty, p.tags, p.time_limit_ms, p.memory_limit_kb,
             p.max_threads, p.network_allowed,
             p.max_score, p.is_public, p.created_at,
-            u.id as owner_id, u.username, u.display_name
+            u.id as owner_id, u.username as owner_username, u.display_name as owner_display_name
         FROM problems p
         JOIN users u ON p.owner_id = u.id
-        WHERE 1=1 {}
+        WHERE 1=1 {visibility_filter}
         ORDER BY p.created_at DESC
         LIMIT $1 OFFSET $2
-        "#,
-        visibility_filter
+        "#
     );
 
-    let rows: Vec<(
-        Uuid,
-        String,
-        Option<String>,
-        Option<Vec<String>>,
-        i32,
-        i32,
-        i32,
-        bool,
-        i32,
-        bool,
-        DateTime<Utc>,
-        Uuid,
-        String,
-        Option<String>,
-    )> = sqlx::query_as(&sql)
+    let count_sql = if query.public_only {
+        "SELECT COUNT(*) FROM problems WHERE is_public = true".to_string()
+    } else if is_admin {
+        "SELECT COUNT(*) FROM problems".to_string()
+    } else if needs_user_bind {
+        format!(
+            r#"SELECT COUNT(*) FROM problems p WHERE (
+                p.is_public = true
+                OR p.owner_id = $1
+                OR EXISTS (
+                    SELECT 1 FROM contest_problems cp
+                    JOIN contests c ON c.id = cp.contest_id
+                    WHERE cp.problem_id = p.id AND c.owner_id = $1
+                )
+                OR EXISTS (
+                    SELECT 1 FROM contest_problems cp
+                    JOIN contest_collaborators cc ON cc.contest_id = cp.contest_id
+                    WHERE cp.problem_id = p.id AND cc.user_id = $1
+                )
+            )"#
+        )
+    } else {
+        "SELECT COUNT(*) FROM problems WHERE is_public = true".to_string()
+    };
+
+    // Build & execute data query
+    let mut q = sqlx::query_as::<_, ProblemListRow>(&sql)
         .bind(per_page as i64)
-        .bind(offset)
+        .bind(offset);
+    if needs_user_bind {
+        q = q.bind(user_id.unwrap());
+    }
+
+    let rows = q
         .fetch_all(&state.db)
         .await
         .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
-    let total: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM problems WHERE is_public = true OR $1::boolean = false",
-    )
-    .bind(query.public_only)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+    // Build & execute count query
+    let mut cq = sqlx::query_scalar::<_, i64>(&count_sql);
+    if needs_user_bind {
+        cq = cq.bind(user_id.unwrap());
+    }
+
+    let total: i64 = cq
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Count query error: {}", e)))?;
 
     let problems: Vec<ProblemSummary> = rows
         .into_iter()
-        .map(|row| ProblemSummary {
-            id: row.0,
-            title: row.1,
-            difficulty: row.2,
-            tags: row.3,
-            time_limit_ms: row.4,
-            memory_limit_kb: row.5,
-            max_threads: row.6,
-            network_allowed: row.7,
-            max_score: row.8,
-            is_public: row.9,
-            created_at: row.10,
+        .map(|r| ProblemSummary {
+            id: r.id,
+            title: r.title,
+            difficulty: r.difficulty,
+            tags: r.tags,
+            time_limit_ms: r.time_limit_ms,
+            memory_limit_kb: r.memory_limit_kb,
+            max_threads: r.max_threads,
+            network_allowed: r.network_allowed,
+            max_score: r.max_score,
+            is_public: r.is_public,
+            created_at: r.created_at,
             owner: OwnerInfo {
-                id: row.11,
-                username: row.12,
-                display_name: row.13,
+                id: r.owner_id,
+                username: r.owner_username,
+                display_name: r.owner_display_name,
             },
         })
         .collect();
 
-    let total_pages = ((total.0 as f64) / (per_page as f64)).ceil() as u32;
+    let total_pages = ((total as f64) / (per_page as f64)).ceil() as u32;
 
     Ok(Json(ProblemListResponse {
         problems,
         pagination: Pagination {
             page,
             per_page,
-            total: total.0,
+            total,
             total_pages,
         },
     }))
@@ -287,7 +355,29 @@ pub async fn get_problem(
     let user_role = user.as_ref().map(|u| u.role.as_str());
 
     if !problem.is_public && user_id != Some(problem.owner_id) && user_role != Some("admin") {
-        return Err(ApiError::NotFound("Problem not found".to_string()));
+        // Check if user is a contest owner or collaborator for any contest containing this problem
+        let has_access = if let Some(uid) = user_id {
+            let access: Option<(i32,)> = sqlx::query_as(
+                r#"SELECT 1 FROM contest_problems cp
+                   WHERE cp.problem_id = $1 AND (
+                       EXISTS (SELECT 1 FROM contests c WHERE c.id = cp.contest_id AND c.owner_id = $2)
+                       OR EXISTS (SELECT 1 FROM contest_collaborators cc WHERE cc.contest_id = cp.contest_id AND cc.user_id = $2)
+                   )
+                   LIMIT 1"#,
+            )
+            .bind(problem_id)
+            .bind(uid)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+            access.is_some()
+        } else {
+            false
+        };
+
+        if !has_access {
+            return Err(ApiError::NotFound("Problem not found".to_string()));
+        }
     }
 
     // Get owner info
