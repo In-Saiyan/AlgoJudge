@@ -37,7 +37,10 @@ pub struct CreateContestRequest {
 
     pub description: Option<String>,
 
-    #[validate(length(max = 500, message = "Short description must be at most 500 characters"))]
+    #[validate(length(
+        max = 500,
+        message = "Short description must be at most 500 characters"
+    ))]
     pub short_description: Option<String>,
 
     pub start_time: DateTime<Utc>,
@@ -73,7 +76,10 @@ pub struct UpdateContestRequest {
 
     pub description: Option<String>,
 
-    #[validate(length(max = 500, message = "Short description must be at most 500 characters"))]
+    #[validate(length(
+        max = 500,
+        message = "Short description must be at most 500 characters"
+    ))]
     pub short_description: Option<String>,
 
     pub start_time: Option<DateTime<Utc>>,

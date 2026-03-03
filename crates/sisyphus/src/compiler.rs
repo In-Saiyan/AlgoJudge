@@ -36,12 +36,15 @@ impl Compiler {
 
     /// Compile a ZIP submission inside a language-specific Docker container.
     async fn compile_zip(&self, job: &CompileJob) -> Result<String> {
-        let file_path = job.file_path.as_ref()
+        let file_path = job
+            .file_path
+            .as_ref()
             .ok_or_else(|| anyhow!("ZIP submission missing file_path"))?;
 
         // Create temp directory for build under the shared volume so
         // sibling Docker containers can access it via bind-mount.
-        fs::create_dir_all(&self.config.build_dir_base).await
+        fs::create_dir_all(&self.config.build_dir_base)
+            .await
             .context("Failed to create build_dir_base")?;
         let temp_dir = tempfile::tempdir_in(&self.config.build_dir_base)
             .context("Failed to create temp build directory")?;
@@ -127,10 +130,7 @@ impl Compiler {
         .await?;
 
         if !output.success {
-            return Err(anyhow!(
-                "Compilation failed:\n{}",
-                output.stderr
-            ));
+            return Err(anyhow!("Compilation failed:\n{}", output.stderr));
         }
 
         // Find and copy the compiled binary
@@ -141,14 +141,17 @@ impl Compiler {
 
     /// Compile a source code submission inside a language-specific Docker container.
     async fn compile_source(&self, job: &CompileJob) -> Result<String> {
-        let language = job.language.as_ref()
+        let language = job
+            .language
+            .as_ref()
             .ok_or_else(|| anyhow!("Source submission missing language"))?;
 
         // Fetch source code from database
         let source_code = self.fetch_source_code(&job.submission_id).await?;
 
         // Create temp directory for build under the shared volume
-        fs::create_dir_all(&self.config.build_dir_base).await
+        fs::create_dir_all(&self.config.build_dir_base)
+            .await
             .context("Failed to create build_dir_base")?;
         let temp_dir = tempfile::tempdir_in(&self.config.build_dir_base)
             .context("Failed to create temp build directory")?;
@@ -165,19 +168,11 @@ impl Compiler {
         // Build a single shell string so we can run it as `sh -c "..."`
         let shell_cmd = compile_cmd.join(" ");
 
-        let output = run_in_container(
-            &self.config,
-            &spec,
-            build_dir,
-            &["sh", "-c", &shell_cmd],
-        )
-        .await?;
+        let output =
+            run_in_container(&self.config, &spec, build_dir, &["sh", "-c", &shell_cmd]).await?;
 
         if !output.success {
-            return Err(anyhow!(
-                "Compilation failed:\n{}",
-                output.stderr
-            ));
+            return Err(anyhow!("Compilation failed:\n{}", output.stderr));
         }
 
         // Save the binary
@@ -195,8 +190,7 @@ impl Compiler {
         tokio::task::spawn_blocking(move || {
             let file = std::fs::File::open(&zip_path)
                 .with_context(|| format!("Failed to open ZIP: {}", zip_path.display()))?;
-            let mut archive = zip::ZipArchive::new(file)
-                .context("Failed to read ZIP archive")?;
+            let mut archive = zip::ZipArchive::new(file).context("Failed to read ZIP archive")?;
 
             for i in 0..archive.len() {
                 let mut file = archive.by_index(i)?;
@@ -232,7 +226,11 @@ impl Compiler {
     }
 
     /// Get the source file name and compile command for a language.
-    fn get_compile_command(&self, language: &str, _build_dir: &Path) -> Result<(String, Vec<&str>)> {
+    fn get_compile_command(
+        &self,
+        language: &str,
+        _build_dir: &Path,
+    ) -> Result<(String, Vec<&str>)> {
         match language {
             "cpp" | "c++" => Ok((
                 "main.cpp".to_string(),
@@ -283,30 +281,22 @@ impl Compiler {
         let run_script = build_dir.join("run.sh");
         if binary_path.is_none() && run_script.exists() {
             // For ZIP submissions, copy the entire build directory as the "binary"
-            let dest_dir = format!(
-                "{}/{}_bin",
-                self.config.binaries_path,
-                job.submission_id
-            );
-            
+            let dest_dir = format!("{}/{}_bin", self.config.binaries_path, job.submission_id);
+
             // Create destination directory
             fs::create_dir_all(&dest_dir).await?;
 
             // Copy all files from build_dir to dest_dir
-            self.copy_dir_recursive(build_dir, Path::new(&dest_dir)).await?;
+            self.copy_dir_recursive(build_dir, Path::new(&dest_dir))
+                .await?;
 
             return Ok(dest_dir);
         }
 
-        let binary_path = binary_path
-            .ok_or_else(|| anyhow!("No compiled binary found"))?;
+        let binary_path = binary_path.ok_or_else(|| anyhow!("No compiled binary found"))?;
 
         // Create destination path
-        let dest_path = format!(
-            "{}/{}_bin",
-            self.config.binaries_path,
-            job.submission_id
-        );
+        let dest_path = format!("{}/{}_bin", self.config.binaries_path, job.submission_id);
 
         // Ensure parent directory exists
         if let Some(parent) = Path::new(&dest_path).parent() {
@@ -314,12 +304,13 @@ impl Compiler {
         }
 
         // Copy binary
-        fs::copy(&binary_path, &dest_path).await
-            .with_context(|| format!(
+        fs::copy(&binary_path, &dest_path).await.with_context(|| {
+            format!(
                 "Failed to copy binary from {} to {}",
                 binary_path.display(),
                 dest_path
-            ))?;
+            )
+        })?;
 
         // Make binary executable
         #[cfg(unix)]

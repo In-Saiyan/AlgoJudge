@@ -44,7 +44,10 @@ impl Verdict {
 
     /// Check if verdict is a failure (not accepted)
     pub fn is_failure(&self) -> bool {
-        !matches!(self, Verdict::Accepted | Verdict::Pending | Verdict::Judging)
+        !matches!(
+            self,
+            Verdict::Accepted | Verdict::Pending | Verdict::Judging
+        )
     }
 
     /// Check if verdict is final (not pending/judging)
@@ -129,7 +132,12 @@ impl TestCaseResult {
     }
 
     /// Create a wrong answer result
-    pub fn wrong_answer(testcase_number: i32, time_ms: u64, memory_kb: u64, comment: Option<String>) -> Self {
+    pub fn wrong_answer(
+        testcase_number: i32,
+        time_ms: u64,
+        memory_kb: u64,
+        comment: Option<String>,
+    ) -> Self {
         Self {
             testcase_number,
             verdict: Verdict::WrongAnswer,
@@ -168,7 +176,13 @@ impl TestCaseResult {
     }
 
     /// Create a runtime error result
-    pub fn runtime_error(testcase_number: i32, time_ms: u64, memory_kb: u64, exit_code: i32, message: String) -> Self {
+    pub fn runtime_error(
+        testcase_number: i32,
+        time_ms: u64,
+        memory_kb: u64,
+        exit_code: i32,
+        message: String,
+    ) -> Self {
         Self {
             testcase_number,
             verdict: Verdict::RuntimeError,
@@ -238,7 +252,10 @@ pub struct SubmissionResult {
 impl SubmissionResult {
     /// Create submission result from test case results
     pub fn from_testcases(results: Vec<TestCaseResult>, total_count: i32) -> Self {
-        let passed_count = results.iter().filter(|r| r.verdict == Verdict::Accepted).count() as i32;
+        let passed_count = results
+            .iter()
+            .filter(|r| r.verdict == Verdict::Accepted)
+            .count() as i32;
 
         let max_time_ms = results.iter().map(|r| r.time_ms).max().unwrap_or(0);
         let max_memory_kb = results.iter().map(|r| r.memory_kb).max().unwrap_or(0);

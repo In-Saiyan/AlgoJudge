@@ -39,10 +39,14 @@ pub struct CreateSubmissionRequest {
     /// Optional contest scope. `None` = standalone submission.
     pub contest_id: Option<Uuid>,
     pub problem_id: Uuid,
-    
+
     pub language: Language,
-    
-    #[validate(length(min = 1, max = 65536, message = "Source code must be 1-65536 characters"))]
+
+    #[validate(length(
+        min = 1,
+        max = 65536,
+        message = "Source code must be 1-65536 characters"
+    ))]
     pub source_code: String,
 }
 

@@ -42,8 +42,9 @@ impl Config {
                 .unwrap_or_else(|_| "8081".to_string())
                 .parse()
                 .expect("PORT must be a number"),
-            database_url: env::var("DATABASE_URL")
-                .unwrap_or_else(|_| "postgres://olympus:olympus_dev@localhost:5432/olympus".to_string()),
+            database_url: env::var("DATABASE_URL").unwrap_or_else(|_| {
+                "postgres://olympus:olympus_dev@localhost:5432/olympus".to_string()
+            }),
             redis_url: env::var("REDIS_URL")
                 .unwrap_or_else(|_| "redis://localhost:6379".to_string()),
             jwt_secret: env::var("JWT_SECRET")
@@ -99,15 +100,15 @@ impl Default for RateLimitConfig {
     fn default() -> Self {
         Self {
             login_limit: 30,
-            login_window: 900,       // 15 minutes
+            login_window: 900, // 15 minutes
             register_limit: 30,
-            register_window: 3600,   // 1 hour
+            register_window: 3600, // 1 hour
             submission_limit: 5,
-            submission_window: 60,   // 1 minute
+            submission_window: 60, // 1 minute
             api_auth_limit: 100,
-            api_auth_window: 60,     // 1 minute
+            api_auth_window: 60, // 1 minute
             api_anon_limit: 20,
-            api_anon_window: 60,     // 1 minute
+            api_anon_window: 60, // 1 minute
         }
     }
 }

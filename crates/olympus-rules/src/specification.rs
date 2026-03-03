@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 /// Core specification trait for composable business rules.
-/// 
+///
 /// The Specification Pattern allows you to compose complex business rules
 /// from simple, reusable predicates.
 #[async_trait]

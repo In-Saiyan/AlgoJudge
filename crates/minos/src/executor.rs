@@ -12,6 +12,7 @@ use tokio::time::{timeout, Duration};
 use uuid::Uuid;
 
 use crate::config::{ExecutionConfig, StorageConfig};
+use crate::sandbox::Sandbox;
 use crate::testcase::{CheckerResult, TestCase, TestCaseManager};
 use crate::verdict::{SubmissionResult, TestCaseResult, Verdict};
 
@@ -86,10 +87,7 @@ impl Executor {
         }
 
         // Create temp directory for this execution
-        let temp_dir = self
-            .storage
-            .temp_path
-            .join(ctx.submission_id.to_string());
+        let temp_dir = self.storage.temp_path.join(ctx.submission_id.to_string());
         fs::create_dir_all(&temp_dir).await?;
 
         // Ensure binary (or run.sh for interpreted languages) is executable.
@@ -123,7 +121,13 @@ impl Executor {
 
         for testcase in &testcases {
             let result = self
-                .run_testcase(ctx, effective_max_threads, &binary_path, testcase, &temp_dir)
+                .run_testcase(
+                    ctx,
+                    effective_max_threads,
+                    &binary_path,
+                    testcase,
+                    &temp_dir,
+                )
                 .await;
 
             match result {
@@ -137,15 +141,8 @@ impl Executor {
                     }
                 }
                 Err(e) => {
-                    tracing::error!(
-                        "Judge error on testcase {}: {}",
-                        testcase.number,
-                        e
-                    );
-                    results.push(TestCaseResult::judge_error(
-                        testcase.number,
-                        e.to_string(),
-                    ));
+                    tracing::error!("Judge error on testcase {}: {}", testcase.number, e);
+                    results.push(TestCaseResult::judge_error(testcase.number, e.to_string()));
                     break;
                 }
             }
@@ -156,7 +153,10 @@ impl Executor {
             tracing::warn!("Failed to cleanup temp dir: {}", e);
         }
 
-        Ok(SubmissionResult::from_testcases(results, testcases.len() as i32))
+        Ok(SubmissionResult::from_testcases(
+            results,
+            testcases.len() as i32,
+        ))
     }
 
     /// Run a single test case
@@ -218,17 +218,17 @@ impl Executor {
                     .await?;
 
                 match checker_result {
-                    CheckerResult::Accepted(_) => {
-                        Ok(TestCaseResult::accepted(testcase.number, elapsed_ms, memory_kb))
-                    }
-                    CheckerResult::WrongAnswer(comment) => {
-                        Ok(TestCaseResult::wrong_answer(
-                            testcase.number,
-                            elapsed_ms,
-                            memory_kb,
-                            Some(comment),
-                        ))
-                    }
+                    CheckerResult::Accepted(_) => Ok(TestCaseResult::accepted(
+                        testcase.number,
+                        elapsed_ms,
+                        memory_kb,
+                    )),
+                    CheckerResult::WrongAnswer(comment) => Ok(TestCaseResult::wrong_answer(
+                        testcase.number,
+                        elapsed_ms,
+                        memory_kb,
+                        Some(comment),
+                    )),
                     CheckerResult::PartialCredit(_points, comment) => {
                         // For now, treat partial as wrong answer
                         // TODO: Implement partial scoring
@@ -244,20 +244,14 @@ impl Executor {
                     }
                 }
             }
-            ExecutionResult::TimeLimitExceeded => {
-                Ok(TestCaseResult::time_limit_exceeded(
-                    testcase.number,
-                    ctx.time_limit_ms,
-                    0,
-                ))
-            }
-            ExecutionResult::MemoryLimitExceeded { memory_kb } => {
-                Ok(TestCaseResult::memory_limit_exceeded(
-                    testcase.number,
-                    elapsed_ms,
-                    memory_kb,
-                ))
-            }
+            ExecutionResult::TimeLimitExceeded => Ok(TestCaseResult::time_limit_exceeded(
+                testcase.number,
+                ctx.time_limit_ms,
+                0,
+            )),
+            ExecutionResult::MemoryLimitExceeded { memory_kb } => Ok(
+                TestCaseResult::memory_limit_exceeded(testcase.number, elapsed_ms, memory_kb),
+            ),
             ExecutionResult::RuntimeError {
                 exit_code,
                 message,
@@ -280,7 +274,7 @@ impl Executor {
         }
     }
 
-    /// Execute binary in sandboxed environment.
+    /// Execute binary in a sandboxed environment.
     ///
     /// The binary is invoked as: `./binary <input_file> <output_file>`
     /// instead of using stdin/stdout piping, which avoids broken-pipe
@@ -290,9 +284,16 @@ impl Executor {
     /// `run.sh` and the source files.  In that case we invoke
     /// `bash run.sh <input_file> <output_file>` with the directory as cwd.
     ///
-    /// `max_threads` controls the PID/thread limit (via RLIMIT_NPROC when
-    /// cgroups are available).  `network_allowed` controls whether loopback
-    /// and external networking are permitted.
+    /// ## Sandboxing
+    ///
+    /// * **cgroups v2** – memory limit (`memory.max`), swap disabled
+    ///   (`memory.swap.max 0`), PID/thread limit (`pids.max`).
+    /// * **Network namespace** – `unshare(CLONE_NEWNET)` via `pre_exec`
+    ///   when `network_allowed` is `false`.
+    /// * **Resource metrics** – peak memory from `memory.peak` (cgroup) or
+    ///   `VmPeak` (`/proc`); CPU time from `cpu.stat`.
+    ///
+    /// When cgroups are unavailable the executor degrades gracefully.
     async fn execute_sandboxed(
         &self,
         binary_path: &Path,
@@ -303,9 +304,6 @@ impl Executor {
         max_threads: i32,
         network_allowed: bool,
     ) -> Result<ExecutionResult> {
-        // For production, this should use proper sandboxing (nsjail, seccomp, cgroups)
-        // This is a simplified version that uses basic process isolation
-
         tracing::debug!(
             binary = %binary_path.display(),
             time_limit_ms,
@@ -315,23 +313,15 @@ impl Executor {
             "Executing submission binary"
         );
 
-        // Helper closure to apply per-problem sandbox env vars to a Command.
-        // These are consumed by the production nsjail/cgroup wrapper;
-        // in the simplified executor they serve as documentation and are
-        // available to the child process for self-limiting.
-        let apply_sandbox_env = |cmd: &mut Command| {
-            cmd.env("MAX_THREADS", max_threads.to_string());
-            cmd.env("NETWORK_ALLOWED", if network_allowed { "1" } else { "0" });
-            cmd.env("TIME_LIMIT_MS", time_limit_ms.to_string());
-            cmd.env("MEMORY_LIMIT_KB", memory_limit_kb.to_string());
-        };
+        // ── 1. Create sandbox (cgroups v2 resource limits) ──────────
+        let sandbox_id = Uuid::new_v4().to_string();
+        let sandbox = Sandbox::create(&sandbox_id, memory_limit_kb, max_threads).await;
 
-        let child = if binary_path.is_dir() {
+        // ── 2. Build the command (without spawning) ─────────────────
+        let mut cmd = if binary_path.is_dir() {
             // Interpreted language: run.sh inside the directory.
-            // Pass input/output paths via env vars AND positional args.
             let run_sh = binary_path.join("run.sh");
-            let run_sh_content = fs::read_to_string(&run_sh).await
-                .unwrap_or_default();
+            let run_sh_content = fs::read_to_string(&run_sh).await.unwrap_or_default();
 
             // Check whether run.sh already forwards args to the inner command.
             let forwards_args = run_sh_content.contains("$1")
@@ -343,24 +333,13 @@ impl Executor {
                 || run_sh_content.contains("OUTPUT_FILE");
 
             if forwards_args {
-                // run.sh handles arg passing — invoke it directly
-                let mut cmd = Command::new("bash");
-                cmd.arg(&run_sh)
+                let mut c = Command::new("bash");
+                c.arg(&run_sh)
                     .arg(input_path)
                     .arg(output_path)
-                    .env("INPUT_FILE", input_path)
-                    .env("OUTPUT_FILE", output_path)
-                    .current_dir(binary_path)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .kill_on_drop(true);
-                apply_sandbox_env(&mut cmd);
-                cmd.spawn()?
+                    .current_dir(binary_path);
+                c
             } else {
-                // run.sh does NOT forward args (e.g. just `python3 main.py`).
-                // Extract the last non-comment command and append our args so
-                // the inner program receives input/output file paths.
                 let cmd_line = run_sh_content
                     .lines()
                     .map(str::trim)
@@ -373,44 +352,71 @@ impl Executor {
                     "run.sh does not forward args — auto-appending file paths"
                 );
 
-                let mut cmd = Command::new("bash");
-                cmd.arg("-c")
+                let mut c = Command::new("bash");
+                c.arg("-c")
                     .arg(format!("{} \"$1\" \"$2\"", cmd_line))
                     .arg("_") // $0 placeholder
                     .arg(input_path)
                     .arg(output_path)
-                    .env("INPUT_FILE", input_path)
-                    .env("OUTPUT_FILE", output_path)
-                    .current_dir(binary_path)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .kill_on_drop(true);
-                apply_sandbox_env(&mut cmd);
-                cmd.spawn()?
+                    .current_dir(binary_path);
+                c
             }
         } else {
-            let mut cmd = Command::new(binary_path);
-            cmd.arg(input_path)
-                .arg(output_path)
-                .env("INPUT_FILE", input_path)
-                .env("OUTPUT_FILE", output_path)
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .kill_on_drop(true);
-            apply_sandbox_env(&mut cmd);
-            cmd.spawn()?
+            let mut c = Command::new(binary_path);
+            c.arg(input_path).arg(output_path);
+            c
         };
 
-        // Wait with timeout
-        let time_limit = Duration::from_millis(time_limit_ms + 100); // Add buffer
+        // ── 3. Common I/O and environment setup ─────────────────────
+        cmd.env("INPUT_FILE", input_path)
+            .env("OUTPUT_FILE", output_path)
+            .env("MAX_THREADS", max_threads.to_string())
+            .env("NETWORK_ALLOWED", if network_allowed { "1" } else { "0" })
+            .env("TIME_LIMIT_MS", time_limit_ms.to_string())
+            .env("MEMORY_LIMIT_KB", memory_limit_kb.to_string())
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+
+        // ── 4. Pre-exec hooks (run in child AFTER fork, BEFORE exec) ──
+        //
+        // a) Join the cgroup so resource accounting starts immediately.
+        if let Some(procs_path) = sandbox.cgroup_procs_path() {
+            unsafe {
+                cmd.pre_exec(move || {
+                    std::fs::write(&procs_path, std::process::id().to_string())?;
+                    Ok(())
+                });
+            }
+        }
+        // b) Network namespace isolation — completely disables networking.
+        if !network_allowed {
+            unsafe {
+                cmd.pre_exec(|| {
+                    nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWNET)
+                        .map_err(std::io::Error::from)?;
+                    Ok(())
+                });
+            }
+        }
+
+        // ── 5. Spawn and wait ───────────────────────────────────────
+        let child = cmd.spawn()?;
+        let child_pid = child.id();
+
+        let time_limit = Duration::from_millis(time_limit_ms + 100); // small buffer
         let result = timeout(time_limit, child.wait_with_output()).await;
 
+        // ── 6. Collect resource metrics and clean up sandbox ────────
+        let usage = sandbox.read_usage(child_pid).await;
+        let oom_killed = sandbox.was_oom_killed().await;
+        sandbox.cleanup().await;
+
+        // ── 7. Determine execution result ───────────────────────────
         match result {
             Ok(Ok(output)) => {
-                // Get memory usage (simplified - would need /proc parsing for accurate values)
-                let memory_kb = 0; // TODO: Implement actual memory tracking
+                let memory_kb = usage.memory_kb;
 
                 if output.status.success() {
                     Ok(ExecutionResult::Success { memory_kb })
@@ -418,17 +424,14 @@ impl Executor {
                     let exit_code = output.status.code().unwrap_or(-1);
                     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
-                    // Check for common signal-based terminations
+                    // Check for signal-based terminations
                     #[cfg(unix)]
                     {
                         use std::os::unix::process::ExitStatusExt;
                         if let Some(signal) = output.status.signal() {
-                            // SIGKILL (9) or SIGXCPU (24) often indicate resource limits
-                            if signal == 9 {
-                                // Could be memory limit - check memory_kb
-                                if memory_kb > memory_limit_kb {
-                                    return Ok(ExecutionResult::MemoryLimitExceeded { memory_kb });
-                                }
+                            // SIGKILL (9) from cgroup OOM killer
+                            if signal == 9 && (oom_killed || memory_kb >= memory_limit_kb) {
+                                return Ok(ExecutionResult::MemoryLimitExceeded { memory_kb });
                             }
                             return Ok(ExecutionResult::RuntimeError {
                                 exit_code: -signal,
@@ -451,7 +454,7 @@ impl Executor {
             }
             Ok(Err(e)) => Err(anyhow!("Failed to execute process: {}", e)),
             Err(_) => {
-                // Timeout - kill the process if still running
+                // Timeout — child is killed via kill_on_drop
                 Ok(ExecutionResult::TimeLimitExceeded)
             }
         }

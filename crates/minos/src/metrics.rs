@@ -3,8 +3,8 @@
 use std::sync::LazyLock;
 
 use prometheus::{
-    Encoder, HistogramOpts, HistogramVec, IntCounter, IntCounterVec,
-    IntGauge, Opts, Registry, TextEncoder,
+    Encoder, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, Opts, Registry,
+    TextEncoder,
 };
 
 /// Global metrics registry
@@ -23,19 +23,16 @@ pub static EXECUTION_DURATION: LazyLock<HistogramVec> = LazyLock::new(|| {
 
 /// Memory usage histogram
 pub static MEMORY_USAGE: LazyLock<HistogramVec> = LazyLock::new(|| {
-    let opts = HistogramOpts::new(
-        "judge_memory_usage_bytes",
-        "Memory used by submissions",
-    )
-    .buckets(vec![
-        1024.0 * 1024.0,        // 1 MB
-        16.0 * 1024.0 * 1024.0, // 16 MB
-        64.0 * 1024.0 * 1024.0, // 64 MB
-        128.0 * 1024.0 * 1024.0, // 128 MB
-        256.0 * 1024.0 * 1024.0, // 256 MB
-        512.0 * 1024.0 * 1024.0, // 512 MB
-        1024.0 * 1024.0 * 1024.0, // 1 GB
-    ]);
+    let opts = HistogramOpts::new("judge_memory_usage_bytes", "Memory used by submissions")
+        .buckets(vec![
+            1024.0 * 1024.0,          // 1 MB
+            16.0 * 1024.0 * 1024.0,   // 16 MB
+            64.0 * 1024.0 * 1024.0,   // 64 MB
+            128.0 * 1024.0 * 1024.0,  // 128 MB
+            256.0 * 1024.0 * 1024.0,  // 256 MB
+            512.0 * 1024.0 * 1024.0,  // 512 MB
+            1024.0 * 1024.0 * 1024.0, // 1 GB
+        ]);
 
     HistogramVec::new(opts, &["problem_id"]).expect("Failed to create histogram")
 });

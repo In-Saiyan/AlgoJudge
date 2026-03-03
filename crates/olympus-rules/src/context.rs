@@ -60,9 +60,9 @@ pub struct FileContext {
     pub is_file: bool,
     pub is_directory: bool,
     pub size_bytes: u64,
-    pub created_at: i64,      // Unix timestamp
-    pub modified_at: i64,     // Unix timestamp
-    pub accessed_at: i64,     // Unix timestamp
+    pub created_at: i64,  // Unix timestamp
+    pub modified_at: i64, // Unix timestamp
+    pub accessed_at: i64, // Unix timestamp
 }
 
 /// Execution result context for judge rules (Minos).
@@ -80,7 +80,7 @@ pub struct ExecutionContext {
 }
 
 /// Authorization context for Vanguard access control.
-/// 
+///
 /// This context carries user identity and database/cache access for
 /// evaluating authorization rules asynchronously.
 #[cfg(feature = "auth")]

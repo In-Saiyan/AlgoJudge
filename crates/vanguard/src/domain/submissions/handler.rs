@@ -1,19 +1,23 @@
 //! Submission handlers.
 
 use axum::{
-    extract::{Path, Query, State, Multipart},
+    extract::{Multipart, Path, Query, State},
     Extension, Json,
 };
 use chrono::Utc;
 use uuid::Uuid;
 use validator::Validate;
 
-use crate::domain::authorization::{build_auth_context, build_contest_context, require_can_submit, require_can_submit_standalone};
+use crate::domain::authorization::{
+    build_auth_context, build_contest_context, require_can_submit, require_can_submit_standalone,
+};
 use crate::error::{ApiError, ApiResult};
-use crate::state::AppState;
 use crate::middleware::auth::AuthUser;
+use crate::state::AppState;
 
-use super::request::{CreateSubmissionRequest, LeaderboardQuery, ListSubmissionsQuery, ZipSubmissionParams};
+use super::request::{
+    CreateSubmissionRequest, LeaderboardQuery, ListSubmissionsQuery, ZipSubmissionParams,
+};
 use super::response::*;
 
 /// POST /api/v1/submissions - Submit source code
@@ -29,7 +33,9 @@ pub async fn create_submission(
     Extension(user): Extension<AuthUser>,
     Json(payload): Json<CreateSubmissionRequest>,
 ) -> ApiResult<Json<SubmissionResponse>> {
-    payload.validate().map_err(|e| ApiError::Validation(format!("{}", e)))?;
+    payload
+        .validate()
+        .map_err(|e| ApiError::Validation(format!("{}", e)))?;
 
     let user_id = user.id;
     let lang_str = payload.language.to_string();
@@ -53,7 +59,9 @@ pub async fn create_submission(
             return Err(ApiError::Validation("Contest is not active".to_string()));
         }
         if now < contest.starts_at {
-            return Err(ApiError::Validation("Contest has not started yet".to_string()));
+            return Err(ApiError::Validation(
+                "Contest has not started yet".to_string(),
+            ));
         }
         if now > contest.ends_at {
             return Err(ApiError::Validation("Contest has ended".to_string()));
@@ -90,7 +98,9 @@ pub async fn create_submission(
         let problem_in_contest = problem_in_contest.unwrap_or(false);
 
         if !problem_in_contest {
-            return Err(ApiError::NotFound("Problem not found in this contest".to_string()));
+            return Err(ApiError::NotFound(
+                "Problem not found in this contest".to_string(),
+            ));
         }
     } else {
         // ── Standalone submission ──────────────────────────────────────
@@ -208,7 +218,9 @@ pub async fn create_zip_submission(
             return Err(ApiError::Validation("Contest is not active".to_string()));
         }
         if now < contest.starts_at {
-            return Err(ApiError::Validation("Contest has not started yet".to_string()));
+            return Err(ApiError::Validation(
+                "Contest has not started yet".to_string(),
+            ));
         }
         if now > contest.ends_at {
             return Err(ApiError::Validation("Contest has ended".to_string()));
@@ -232,7 +244,9 @@ pub async fn create_zip_submission(
         .await?;
 
         if !problem_in_contest.unwrap_or(false) {
-            return Err(ApiError::NotFound("Problem not found in this contest".to_string()));
+            return Err(ApiError::NotFound(
+                "Problem not found in this contest".to_string(),
+            ));
         }
     } else {
         // ── Standalone submission ──────────────────────────────────────
@@ -261,32 +275,31 @@ pub async fn create_zip_submission(
     // Process multipart form with streaming size validation
     let mut zip_data: Option<Vec<u8>> = None;
 
-    while let Some(field) = multipart.next_field().await.map_err(|e| {
-        ApiError::Validation(format!("Failed to read multipart: {}", e))
-    })? {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| ApiError::Validation(format!("Failed to read multipart: {}", e)))?
+    {
         let name = field.name().unwrap_or_default().to_string();
         if name == "file" {
-            let data = field.bytes().await.map_err(|e| {
-                ApiError::Validation(format!("Failed to read file: {}", e))
-            })?;
+            let data = field
+                .bytes()
+                .await
+                .map_err(|e| ApiError::Validation(format!("Failed to read file: {}", e)))?;
 
             if data.len() > max_size {
-                return Err(ApiError::Validation(
-                    format!(
-                        "File size ({:.2}MB) exceeds limit ({:.2}MB)",
-                        data.len() as f64 / 1024.0 / 1024.0,
-                        max_size as f64 / 1024.0 / 1024.0
-                    )
-                ));
+                return Err(ApiError::Validation(format!(
+                    "File size ({:.2}MB) exceeds limit ({:.2}MB)",
+                    data.len() as f64 / 1024.0 / 1024.0,
+                    max_size as f64 / 1024.0 / 1024.0
+                )));
             }
 
             zip_data = Some(data.to_vec());
         }
     }
 
-    let zip_data = zip_data.ok_or_else(|| {
-        ApiError::Validation("No file uploaded".to_string())
-    })?;
+    let zip_data = zip_data.ok_or_else(|| ApiError::Validation("No file uploaded".to_string()))?;
 
     validate_zip_structure(&zip_data)?;
 
@@ -309,14 +322,14 @@ pub async fn create_zip_submission(
     };
 
     if let Some(parent) = std::path::Path::new(&storage_path).parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(|e| {
-            ApiError::Internal(format!("Failed to create directory: {}", e))
-        })?;
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Failed to create directory: {}", e)))?;
     }
 
-    tokio::fs::write(&storage_path, &zip_data).await.map_err(|e| {
-        ApiError::Internal(format!("Failed to save submission: {}", e))
-    })?;
+    tokio::fs::write(&storage_path, &zip_data)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to save submission: {}", e)))?;
 
     sqlx::query(
         r#"
@@ -393,18 +406,14 @@ const DEFAULT_MAX_SUBMISSION_SIZE: usize = 10 * 1024 * 1024;
 const MAX_ALLOWED_SUBMISSION_SIZE: usize = 100 * 1024 * 1024;
 
 /// Get contest-specific upload limit or return default
-async fn get_contest_upload_limit(
-    db: &sqlx::PgPool,
-    contest_id: Uuid,
-) -> Result<usize, ApiError> {
-    let limit: Option<i32> = sqlx::query_scalar(
-        "SELECT max_submission_size_mb FROM contests WHERE id = $1"
-    )
-    .bind(contest_id)
-    .fetch_optional(db)
-    .await?
-    .flatten();
-    
+async fn get_contest_upload_limit(db: &sqlx::PgPool, contest_id: Uuid) -> Result<usize, ApiError> {
+    let limit: Option<i32> =
+        sqlx::query_scalar("SELECT max_submission_size_mb FROM contests WHERE id = $1")
+            .bind(contest_id)
+            .fetch_optional(db)
+            .await?
+            .flatten();
+
     Ok(limit
         .map(|mb| (mb as usize * 1024 * 1024).min(MAX_ALLOWED_SUBMISSION_SIZE))
         .unwrap_or(DEFAULT_MAX_SUBMISSION_SIZE))
@@ -421,9 +430,8 @@ fn validate_zip_structure(data: &[u8]) -> Result<(), ApiError> {
 
     let compressed_size = data.len();
     let reader = Cursor::new(data);
-    let mut archive = ZipArchive::new(reader).map_err(|e| {
-        ApiError::Validation(format!("Invalid ZIP file: {}", e))
-    })?;
+    let mut archive = ZipArchive::new(reader)
+        .map_err(|e| ApiError::Validation(format!("Invalid ZIP file: {}", e)))?;
 
     let mut has_compile = false;
     let mut has_run = false;
@@ -431,33 +439,33 @@ fn validate_zip_structure(data: &[u8]) -> Result<(), ApiError> {
     let max_uncompressed = (compressed_size as u64) * 5; // Zip bomb protection
 
     for i in 0..archive.len() {
-        let file = archive.by_index(i).map_err(|e| {
-            ApiError::Validation(format!("Failed to read ZIP entry: {}", e))
-        })?;
-        
+        let file = archive
+            .by_index(i)
+            .map_err(|e| ApiError::Validation(format!("Failed to read ZIP entry: {}", e)))?;
+
         let name = file.name();
-        
+
         // Security: Check for path traversal
         if name.contains("..") {
             return Err(ApiError::Validation(
                 "ZIP contains path traversal (..): rejected for security".to_string(),
             ));
         }
-        
+
         // Security: Check for absolute paths
         if name.starts_with('/') {
             return Err(ApiError::Validation(
                 "ZIP contains absolute path: rejected for security".to_string(),
             ));
         }
-        
+
         // Security: Check for symlinks
         if file.is_symlink() {
             return Err(ApiError::Validation(
                 "ZIP contains symlinks: rejected for security".to_string(),
             ));
         }
-        
+
         // Track uncompressed size for zip bomb detection
         total_uncompressed += file.size();
         if total_uncompressed > max_uncompressed {
@@ -482,9 +490,7 @@ fn validate_zip_structure(data: &[u8]) -> Result<(), ApiError> {
         ));
     }
     if !has_run {
-        return Err(ApiError::Validation(
-            "ZIP must contain run.sh".to_string(),
-        ));
+        return Err(ApiError::Validation("ZIP must contain run.sh".to_string()));
     }
 
     Ok(())
@@ -522,9 +528,10 @@ pub async fn list_submissions(
     .fetch_all(&state.db)
     .await?;
 
-    let total: Option<i64> = sqlx::query_scalar::<_, Option<i64>>("SELECT COUNT(*) FROM submissions")
-        .fetch_one(&state.db)
-        .await?;
+    let total: Option<i64> =
+        sqlx::query_scalar::<_, Option<i64>>("SELECT COUNT(*) FROM submissions")
+            .fetch_one(&state.db)
+            .await?;
     let total = total.unwrap_or(0);
 
     let total_pages = ((total as f64) / (params.per_page as f64)).ceil() as u32;
@@ -543,10 +550,10 @@ pub async fn list_submissions(
                 title: row.problem_title,
                 problem_code: row.problem_code,
             },
-            contest: row.contest_id.zip(row.contest_title).map(|(id, title)| ContestInfo {
-                id,
-                title,
-            }),
+            contest: row
+                .contest_id
+                .zip(row.contest_title)
+                .map(|(id, title)| ContestInfo { id, title }),
             language: row.language,
             status: row.status,
             score: row.score,
@@ -630,10 +637,10 @@ pub async fn get_submission(
             title: row.problem_title,
             problem_code: row.problem_code,
         },
-        contest: row.contest_id.zip(row.contest_title).map(|(id, title)| ContestInfo {
-            id,
-            title,
-        }),
+        contest: row
+            .contest_id
+            .zip(row.contest_title)
+            .map(|(id, title)| ContestInfo { id, title }),
         submission_type: row.submission_type,
         language: row.language,
         status: row.status,
@@ -822,12 +829,11 @@ pub async fn get_user_submissions(
     .fetch_all(&state.db)
     .await?;
 
-    let total: Option<i64> = sqlx::query_scalar::<_, Option<i64>>(
-        "SELECT COUNT(*) FROM submissions WHERE user_id = $1"
-    )
-    .bind(user_id)
-    .fetch_one(&state.db)
-    .await?;
+    let total: Option<i64> =
+        sqlx::query_scalar::<_, Option<i64>>("SELECT COUNT(*) FROM submissions WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&state.db)
+            .await?;
     let total = total.unwrap_or(0);
 
     let total_pages = ((total as f64) / (params.per_page as f64)).ceil() as u32;
@@ -846,10 +852,10 @@ pub async fn get_user_submissions(
                 title: row.problem_title,
                 problem_code: row.problem_code,
             },
-            contest: row.contest_id.zip(row.contest_title).map(|(id, title)| ContestInfo {
-                id,
-                title,
-            }),
+            contest: row
+                .contest_id
+                .zip(row.contest_title)
+                .map(|(id, title)| ContestInfo { id, title }),
             language: row.language,
             status: row.status,
             score: row.score,

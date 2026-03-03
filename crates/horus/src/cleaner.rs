@@ -218,10 +218,7 @@ impl CleanupRunner {
             return Ok(stats);
         }
 
-        tracing::info!(
-            "Cleaning submissions older than {} days",
-            retention_days
-        );
+        tracing::info!("Cleaning submissions older than {} days", retention_days);
 
         // Get old submissions from database
         let old_submissions = sqlx::query_scalar::<_, uuid::Uuid>(

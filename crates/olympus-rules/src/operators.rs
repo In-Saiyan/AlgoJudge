@@ -10,7 +10,7 @@ use crate::specification::{And, Not, Or, Specification};
 use std::ops::{BitAnd, BitOr, Not as StdNot};
 
 /// Wrapper struct to enable operator overloading on specifications.
-/// 
+///
 /// Use this wrapper to compose specifications with operators:
 /// ```ignore
 /// let rule = Spec(IsValidUser) & Spec(IsParticipant);

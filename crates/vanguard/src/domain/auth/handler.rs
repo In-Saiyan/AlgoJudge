@@ -1,27 +1,27 @@
 //! Authentication handlers.
 
+use argon2::{
+    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    Argon2,
+};
 use axum::{
     extract::{Extension, State},
     http::StatusCode,
     Json,
-};
-use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
-    Argon2,
 };
 use chrono::{DateTime, Utc};
 use sqlx::{FromRow, Row};
 use uuid::Uuid;
 use validator::Validate;
 
-use crate::error::{ApiError, ApiResult};
-use crate::state::AppState;
-use crate::middleware::auth::AuthUser;
 use super::{
+    jwt::JwtManager,
     request::{LoginRequest, RefreshRequest, RegisterRequest},
     response::{AuthTokensResponse, LoginResponse, LogoutResponse, RegisterResponse, UserResponse},
-    jwt::JwtManager,
 };
+use crate::error::{ApiError, ApiResult};
+use crate::middleware::auth::AuthUser;
+use crate::state::AppState;
 
 /// User row from database
 #[derive(Debug, FromRow)]
@@ -38,34 +38,32 @@ struct UserRow {
 }
 
 /// POST /api/v1/auth/register
-/// 
+///
 /// Register a new user account.
 pub async fn register(
     State(state): State<AppState>,
     Json(payload): Json<RegisterRequest>,
 ) -> ApiResult<(StatusCode, Json<RegisterResponse>)> {
     // Validate request
-    payload.validate().map_err(|e| ApiError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| ApiError::Validation(e.to_string()))?;
 
     // Check if username exists
-    let exists: (bool,) = sqlx::query_as(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)"
-    )
-    .bind(&payload.username)
-    .fetch_one(&state.db)
-    .await?;
+    let exists: (bool,) = sqlx::query_as("SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)")
+        .bind(&payload.username)
+        .fetch_one(&state.db)
+        .await?;
 
     if exists.0 {
         return Err(ApiError::Conflict("Username already exists".to_string()));
     }
 
     // Check if email exists
-    let exists: (bool,) = sqlx::query_as(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)"
-    )
-    .bind(&payload.email)
-    .fetch_one(&state.db)
-    .await?;
+    let exists: (bool,) = sqlx::query_as("SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)")
+        .bind(&payload.email)
+        .fetch_one(&state.db)
+        .await?;
 
     if exists.0 {
         return Err(ApiError::Conflict("Email already registered".to_string()));
@@ -82,7 +80,10 @@ pub async fn register(
     // Create user
     let user_id = Uuid::new_v4();
     let now = Utc::now();
-    let display_name = payload.display_name.clone().unwrap_or_else(|| payload.username.clone());
+    let display_name = payload
+        .display_name
+        .clone()
+        .unwrap_or_else(|| payload.username.clone());
 
     sqlx::query(
         r#"
@@ -107,7 +108,8 @@ pub async fn register(
     );
 
     let session_id = Uuid::new_v4();
-    let access_token = jwt_manager.generate_access_token(user_id, &payload.username, "participant")?;
+    let access_token =
+        jwt_manager.generate_access_token(user_id, &payload.username, "participant")?;
     let refresh_token = jwt_manager.generate_refresh_token(user_id, session_id)?;
 
     // Store refresh token session in Redis
@@ -143,14 +145,16 @@ pub async fn register(
 }
 
 /// POST /api/v1/auth/login
-/// 
+///
 /// Login with username/email and password.
 pub async fn login(
     State(state): State<AppState>,
     Json(payload): Json<LoginRequest>,
 ) -> ApiResult<Json<LoginResponse>> {
     // Validate request
-    payload.validate().map_err(|e| ApiError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| ApiError::Validation(e.to_string()))?;
 
     // Find user by username or email
     let user: UserRow = sqlx::query_as(
@@ -158,7 +162,7 @@ pub async fn login(
         SELECT id, username, email, password_hash, display_name, bio, role, created_at, updated_at
         FROM users
         WHERE username = $1 OR email = $1
-        "#
+        "#,
     )
     .bind(&payload.identifier)
     .fetch_optional(&state.db)
@@ -217,7 +221,7 @@ pub async fn login(
 }
 
 /// POST /api/v1/auth/refresh
-/// 
+///
 /// Refresh access token using refresh token.
 pub async fn refresh(
     State(state): State<AppState>,
@@ -282,7 +286,7 @@ pub async fn refresh(
 }
 
 /// POST /api/v1/auth/logout
-/// 
+///
 /// Logout and invalidate the current session.
 pub async fn logout(
     State(state): State<AppState>,
@@ -309,7 +313,7 @@ pub async fn logout(
 }
 
 /// GET /api/v1/auth/me
-/// 
+///
 /// Get the current authenticated user's profile.
 pub async fn me(
     State(state): State<AppState>,
@@ -320,7 +324,7 @@ pub async fn me(
         SELECT id, username, email, password_hash, display_name, bio, role, created_at, updated_at
         FROM users
         WHERE id = $1
-        "#
+        "#,
     )
     .bind(user.id)
     .fetch_optional(&state.db)

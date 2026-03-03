@@ -177,15 +177,11 @@ pub struct HasActiveSubmission;
 impl CleanupSpec for HasActiveSubmission {
     async fn is_satisfied_by(&self, ctx: &CleanupContext<'_>) -> bool {
         // Extract submission ID from path (e.g., /temp/{submission_id}/)
-        let submission_id = ctx
-            .path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .and_then(|s| {
-                // Handle both "{uuid}" and "{uuid}_bin" formats
-                let clean = s.trim_end_matches("_bin");
-                Uuid::parse_str(clean).ok()
-            });
+        let submission_id = ctx.path.file_name().and_then(|n| n.to_str()).and_then(|s| {
+            // Handle both "{uuid}" and "{uuid}_bin" formats
+            let clean = s.trim_end_matches("_bin");
+            Uuid::parse_str(clean).ok()
+        });
 
         if let Some(id) = submission_id {
             // Check if submission is in a non-final state
@@ -213,22 +209,17 @@ pub struct HasSubmissionRecord;
 #[async_trait]
 impl CleanupSpec for HasSubmissionRecord {
     async fn is_satisfied_by(&self, ctx: &CleanupContext<'_>) -> bool {
-        let submission_id = ctx
-            .path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .and_then(|s| {
-                let clean = s.trim_end_matches("_bin");
-                Uuid::parse_str(clean).ok()
-            });
+        let submission_id = ctx.path.file_name().and_then(|n| n.to_str()).and_then(|s| {
+            let clean = s.trim_end_matches("_bin");
+            Uuid::parse_str(clean).ok()
+        });
 
         if let Some(id) = submission_id {
-            let result = sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM submissions WHERE id = $1",
-            )
-            .bind(id)
-            .fetch_one(ctx.db_pool)
-            .await;
+            let result =
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM submissions WHERE id = $1")
+                    .bind(id)
+                    .fetch_one(ctx.db_pool)
+                    .await;
 
             return result.map(|count| count > 0).unwrap_or(false);
         }
@@ -254,12 +245,11 @@ impl CleanupSpec for HasProblemRecord {
             .and_then(|s| Uuid::parse_str(s).ok());
 
         if let Some(id) = problem_id {
-            let result = sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM problems WHERE id = $1",
-            )
-            .bind(id)
-            .fetch_one(ctx.db_pool)
-            .await;
+            let result =
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM problems WHERE id = $1")
+                    .bind(id)
+                    .fetch_one(ctx.db_pool)
+                    .await;
 
             return result.map(|count| count > 0).unwrap_or(false);
         }

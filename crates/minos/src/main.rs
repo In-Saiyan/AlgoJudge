@@ -9,6 +9,7 @@ mod config;
 mod consumer;
 mod executor;
 mod metrics;
+mod sandbox;
 mod testcase;
 mod verdict;
 

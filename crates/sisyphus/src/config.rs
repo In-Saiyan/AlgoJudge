@@ -79,8 +79,9 @@ impl Config {
     pub fn from_env() -> Self {
         Self {
             environment: env::var("ENVIRONMENT").unwrap_or_else(|_| "development".to_string()),
-            database_url: env::var("DATABASE_URL")
-                .unwrap_or_else(|_| "postgres://olympus:olympus@localhost:5432/olympus".to_string()),
+            database_url: env::var("DATABASE_URL").unwrap_or_else(|_| {
+                "postgres://olympus:olympus@localhost:5432/olympus".to_string()
+            }),
             redis_url: env::var("REDIS_URL")
                 .unwrap_or_else(|_| "redis://localhost:6379".to_string()),
             consumer_group: env::var("CONSUMER_GROUP")
@@ -89,8 +90,7 @@ impl Config {
                 .unwrap_or_else(|_| format!("sisyphus_{}", uuid::Uuid::new_v4())),
             compile_stream: env::var("COMPILE_STREAM")
                 .unwrap_or_else(|_| "compile_queue".to_string()),
-            run_stream: env::var("RUN_STREAM")
-                .unwrap_or_else(|_| "run_queue".to_string()),
+            run_stream: env::var("RUN_STREAM").unwrap_or_else(|_| "run_queue".to_string()),
             compile_timeout_secs: env::var("COMPILE_TIMEOUT_SECS")
                 .ok()
                 .and_then(|s| s.parse().ok())
@@ -122,8 +122,7 @@ impl Config {
             docker_api_version: env::var("DOCKER_API_VERSION").ok(),
             build_dir_base: env::var("BUILD_DIR_BASE")
                 .unwrap_or_else(|_| "/mnt/data/temp/builds".to_string()),
-            data_path: env::var("STORAGE_BASE_PATH")
-                .unwrap_or_else(|_| "/mnt/data".to_string()),
+            data_path: env::var("STORAGE_BASE_PATH").unwrap_or_else(|_| "/mnt/data".to_string()),
             docker_host_data_path: env::var("DOCKER_HOST_DATA_PATH").ok(),
         }
     }

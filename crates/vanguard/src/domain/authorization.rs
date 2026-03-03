@@ -198,7 +198,7 @@ pub async fn require_not_rate_limited(ctx: &AuthContext) -> ApiResult<()> {
 }
 
 /// Check if user can submit to a contest.
-/// 
+///
 /// Rule: IsValidUser AND ((IsParticipant AND NotRateLimited) OR IsAdmin OR IsCollaborator)
 pub async fn require_can_submit(ctx: &AuthContext) -> ApiResult<()> {
     // Must be valid user

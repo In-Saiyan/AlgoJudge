@@ -61,10 +61,7 @@ impl JudgeConsumer {
         redis_pool: deadpool_redis::Pool,
         shutdown: Arc<AtomicBool>,
     ) -> Self {
-        let executor = Executor::new(
-            config.storage.clone(),
-            config.execution.clone(),
-        );
+        let executor = Executor::new(config.storage.clone(), config.execution.clone());
 
         Self {
             config,
@@ -385,12 +382,10 @@ impl JudgeConsumer {
                 "Problem binaries (generator/checker) not ready — setting queue_pending"
             );
 
-            sqlx::query(
-                "UPDATE submissions SET status = 'queue_pending' WHERE id = $1",
-            )
-            .bind(job.submission_id)
-            .execute(&self.db_pool)
-            .await?;
+            sqlx::query("UPDATE submissions SET status = 'queue_pending' WHERE id = $1")
+                .bind(job.submission_id)
+                .execute(&self.db_pool)
+                .await?;
 
             // Return a sentinel result so the caller knows to ACK without recording
             // test-case results.
@@ -398,12 +393,10 @@ impl JudgeConsumer {
         }
 
         // Update status to judging
-        sqlx::query(
-            "UPDATE submissions SET status = 'judging', judged_at = NOW() WHERE id = $1",
-        )
-        .bind(job.submission_id)
-        .execute(&self.db_pool)
-        .await?;
+        sqlx::query("UPDATE submissions SET status = 'judging', judged_at = NOW() WHERE id = $1")
+            .bind(job.submission_id)
+            .execute(&self.db_pool)
+            .await?;
 
         let ctx = ExecutionContext {
             submission_id: job.submission_id,

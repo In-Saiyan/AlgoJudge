@@ -10,12 +10,12 @@ mod state;
 
 use std::net::SocketAddr;
 
+use axum::http::{header, Method};
 use axum::{
     middleware as axum_middleware,
     routing::{get, post},
     Router,
 };
-use axum::http::{header, Method};
 use tower_http::{
     cors::{Any, CorsLayer},
     trace::TraceLayer,
@@ -24,7 +24,10 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config::{create_db_pool, create_redis_pool, Config, RateLimitConfig};
 use crate::domain::{admin, auth, contests, health, problems, submissions, users};
-use crate::middleware::{auth::{auth_middleware, admin_middleware}, rate_limit::*};
+use crate::middleware::{
+    auth::{admin_middleware, auth_middleware},
+    rate_limit::*,
+};
 use crate::state::AppState;
 
 #[tokio::main]
@@ -71,8 +74,11 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }
@@ -140,11 +146,9 @@ fn create_router(state: AppState) -> Router {
     let public_contest_routes = contests::contest_routes();
 
     // Protected contest routes
-    let protected_contest_routes = contests::protected_contest_routes()
-        .layer(axum_middleware::from_fn_with_state(
-            state.clone(),
-            auth_middleware,
-        ));
+    let protected_contest_routes = contests::protected_contest_routes().layer(
+        axum_middleware::from_fn_with_state(state.clone(), auth_middleware),
+    );
 
     // Combine contest routes
     let contest_routes = Router::new()
@@ -155,11 +159,9 @@ fn create_router(state: AppState) -> Router {
     let public_problem_routes = problems::problem_routes();
 
     // Protected problem routes
-    let protected_problem_routes = problems::protected_problem_routes()
-        .layer(axum_middleware::from_fn_with_state(
-            state.clone(),
-            auth_middleware,
-        ));
+    let protected_problem_routes = problems::protected_problem_routes().layer(
+        axum_middleware::from_fn_with_state(state.clone(), auth_middleware),
+    );
 
     // Combine problem routes
     let problem_routes = Router::new()
@@ -168,21 +170,28 @@ fn create_router(state: AppState) -> Router {
 
     // Contest problems routes (nested under contests)
     let contest_problems_routes = Router::new()
-        .route("/{contest_id}/problems", axum::routing::get(problems::list_contest_problems))
         .route(
             "/{contest_id}/problems",
-            axum::routing::post(problems::add_problem_to_contest)
-                .layer(axum_middleware::from_fn_with_state(state.clone(), auth_middleware)),
+            axum::routing::get(problems::list_contest_problems),
+        )
+        .route(
+            "/{contest_id}/problems",
+            axum::routing::post(problems::add_problem_to_contest).layer(
+                axum_middleware::from_fn_with_state(state.clone(), auth_middleware),
+            ),
         )
         .route(
             "/{contest_id}/problems/{problem_id}",
-            axum::routing::delete(problems::remove_problem_from_contest)
-                .layer(axum_middleware::from_fn_with_state(state.clone(), auth_middleware)),
+            axum::routing::delete(problems::remove_problem_from_contest).layer(
+                axum_middleware::from_fn_with_state(state.clone(), auth_middleware),
+            ),
         );
 
     // Contest leaderboard routes
-    let contest_leaderboard_routes = Router::new()
-        .route("/{contest_id}/leaderboard", get(submissions::get_contest_leaderboard));
+    let contest_leaderboard_routes = Router::new().route(
+        "/{contest_id}/leaderboard",
+        get(submissions::get_contest_leaderboard),
+    );
 
     // Submission routes (all protected)
     // Create routes with additional submission rate limit
@@ -215,17 +224,21 @@ fn create_router(state: AppState) -> Router {
         .merge(submission_read_routes);
 
     // User submissions route
-    let user_submissions_routes = Router::new()
-        .route(
-            "/{id}/submissions",
-            get(submissions::get_user_submissions)
-                .layer(axum_middleware::from_fn_with_state(state.clone(), auth_middleware)),
-        );
+    let user_submissions_routes = Router::new().route(
+        "/{id}/submissions",
+        get(submissions::get_user_submissions).layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        )),
+    );
 
     // Admin routes (requires auth + admin role)
     let admin_routes = Router::new()
         .route("/users", get(admin::admin_list_users))
-        .route("/users/{id}/role", axum::routing::put(admin::update_user_role))
+        .route(
+            "/users/{id}/role",
+            axum::routing::put(admin::update_user_role),
+        )
         .route("/users/{id}/ban", post(admin::ban_user))
         .route("/users/{id}/unban", post(admin::unban_user))
         .route("/stats", get(admin::system_stats))

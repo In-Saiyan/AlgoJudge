@@ -139,6 +139,51 @@ impl Specification<ExecutionContext> for OutputMatches {
     }
 }
 
+// =============================================================================
+// Composite verdict rule
+// =============================================================================
+
+/// Composite specification that returns `true` when an execution is Accepted:
+/// within time limit **and** within memory limit **and** exit code 0 **and**
+/// output matches.
+pub struct AcceptedVerdict;
+
+#[async_trait]
+impl Specification<ExecutionContext> for AcceptedVerdict {
+    async fn is_satisfied_by(&self, ctx: &ExecutionContext) -> bool {
+        WithinTimeLimit.is_satisfied_by(ctx).await
+            && WithinMemoryLimit.is_satisfied_by(ctx).await
+            && ExitCodeZero.is_satisfied_by(ctx).await
+            && OutputMatches.is_satisfied_by(ctx).await
+    }
+}
+
+/// Utility for determining the specific verdict code from an
+/// [`ExecutionContext`].
+///
+/// Checks rules in priority order: **TLE → MLE → RE → WA → AC**.
+pub struct VerdictDeterminer;
+
+impl VerdictDeterminer {
+    /// Determine the verdict code string (e.g. `"AC"`, `"TLE"`, `"MLE"`,
+    /// `"RE"`, `"WA"`).
+    pub async fn determine(ctx: &ExecutionContext) -> &'static str {
+        if !WithinTimeLimit.is_satisfied_by(ctx).await {
+            return "TLE";
+        }
+        if !WithinMemoryLimit.is_satisfied_by(ctx).await {
+            return "MLE";
+        }
+        if !ExitCodeZero.is_satisfied_by(ctx).await {
+            return "RE";
+        }
+        if !OutputMatches.is_satisfied_by(ctx).await {
+            return "WA";
+        }
+        "AC"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,7 +232,7 @@ mod tests {
     #[tokio::test]
     async fn test_cleanup_rule_composition() {
         let ctx = sample_file_context(8);
-        
+
         // Stale file rule: (accessed > 6 hours ago) AND (is file)
         let rule = Spec(LastAccessOlderThan::new(6)) & Spec(IsFile);
         assert!(rule.is_satisfied_by(&ctx).await);
@@ -196,7 +241,7 @@ mod tests {
     #[tokio::test]
     async fn test_execution_rules() {
         let ctx = sample_execution_context(500, 100000, 0);
-        
+
         // Accepted rule: within time AND within memory AND exit 0 AND output matches
         let rule = Spec(WithinTimeLimit)
             & Spec(WithinMemoryLimit)
@@ -208,8 +253,50 @@ mod tests {
     #[tokio::test]
     async fn test_tle_detection() {
         let ctx = sample_execution_context(1500, 100000, 0); // 1500ms > 1000ms limit
-        
+
         let rule = Spec(WithinTimeLimit);
         assert!(!rule.is_satisfied_by(&ctx).await);
+    }
+
+    #[tokio::test]
+    async fn test_accepted_verdict_composite() {
+        let ctx = sample_execution_context(500, 100000, 0);
+        assert!(AcceptedVerdict.is_satisfied_by(&ctx).await);
+
+        // TLE should fail
+        let tle_ctx = sample_execution_context(1500, 100000, 0);
+        assert!(!AcceptedVerdict.is_satisfied_by(&tle_ctx).await);
+
+        // MLE should fail
+        let mle_ctx = sample_execution_context(500, 300000, 0);
+        assert!(!AcceptedVerdict.is_satisfied_by(&mle_ctx).await);
+
+        // RE should fail
+        let re_ctx = sample_execution_context(500, 100000, 1);
+        assert!(!AcceptedVerdict.is_satisfied_by(&re_ctx).await);
+    }
+
+    #[tokio::test]
+    async fn test_verdict_determiner() {
+        // AC
+        let ctx = sample_execution_context(500, 100000, 0);
+        assert_eq!(VerdictDeterminer::determine(&ctx).await, "AC");
+
+        // TLE
+        let tle = sample_execution_context(1500, 100000, 0);
+        assert_eq!(VerdictDeterminer::determine(&tle).await, "TLE");
+
+        // MLE
+        let mle = sample_execution_context(500, 300000, 0);
+        assert_eq!(VerdictDeterminer::determine(&mle).await, "MLE");
+
+        // RE (exit code != 0)
+        let re = sample_execution_context(500, 100000, 139);
+        assert_eq!(VerdictDeterminer::determine(&re).await, "RE");
+
+        // WA (exit 0 but output doesn't match)
+        let mut wa = sample_execution_context(500, 100000, 0);
+        wa.output_matches = false;
+        assert_eq!(VerdictDeterminer::determine(&wa).await, "WA");
     }
 }

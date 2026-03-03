@@ -104,17 +104,18 @@ impl Config {
 
         Self {
             environment: env::var("ENVIRONMENT").unwrap_or_else(|_| "development".to_string()),
-            database_url: env::var("DATABASE_URL")
-                .expect("DATABASE_URL must be set"),
+            database_url: env::var("DATABASE_URL").expect("DATABASE_URL must be set"),
             redis_url: env::var("REDIS_URL")
                 .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string()),
             worker_id: env::var("WORKER_ID").unwrap_or_else(|_| {
-                format!("minos_worker_{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap())
+                format!(
+                    "minos_worker_{}",
+                    uuid::Uuid::new_v4().to_string().split('-').next().unwrap()
+                )
             }),
             consumer_group: env::var("CONSUMER_GROUP")
                 .unwrap_or_else(|_| "minos_group".to_string()),
-            stream_name: env::var("STREAM_NAME")
-                .unwrap_or_else(|_| "run_queue".to_string()),
+            stream_name: env::var("STREAM_NAME").unwrap_or_else(|_| "run_queue".to_string()),
             block_timeout_ms: env::var("BLOCK_TIMEOUT_MS")
                 .ok()
                 .and_then(|v| v.parse().ok())

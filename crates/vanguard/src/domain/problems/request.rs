@@ -49,7 +49,11 @@ pub struct CreateProblemRequest {
     #[serde(default = "default_time_limit")]
     pub time_limit_ms: i32,
 
-    #[validate(range(min = 16384, max = 1048576, message = "Memory limit must be 16-1024 MB"))]
+    #[validate(range(
+        min = 16384,
+        max = 1048576,
+        message = "Memory limit must be 16-1024 MB"
+    ))]
     #[serde(default = "default_memory_limit")]
     pub memory_limit_kb: i32,
 
@@ -68,7 +72,6 @@ pub struct CreateProblemRequest {
 
     // Note: generator and checker binaries are uploaded separately via
     // POST /api/v1/problems/{id}/generator and POST /api/v1/problems/{id}/checker
-
     #[validate(range(min = 1, max = 10000, message = "Max score must be 1-10000"))]
     #[serde(default = "default_max_score")]
     pub max_score: i32,
@@ -125,7 +128,11 @@ pub struct UpdateProblemRequest {
     #[validate(range(min = 100, max = 30000, message = "Time limit must be 100-30000 ms"))]
     pub time_limit_ms: Option<i32>,
 
-    #[validate(range(min = 16384, max = 1048576, message = "Memory limit must be 16-1024 MB"))]
+    #[validate(range(
+        min = 16384,
+        max = 1048576,
+        message = "Memory limit must be 16-1024 MB"
+    ))]
     pub memory_limit_kb: Option<i32>,
 
     #[validate(range(min = 1, max = 100, message = "Number of test cases must be 1-100"))]
@@ -140,7 +147,6 @@ pub struct UpdateProblemRequest {
 
     // Note: generator and checker binaries are uploaded separately via
     // POST /api/v1/problems/{id}/generator and POST /api/v1/problems/{id}/checker
-
     #[validate(range(min = 1, max = 10000, message = "Max score must be 1-10000"))]
     pub max_score: Option<i32>,
 

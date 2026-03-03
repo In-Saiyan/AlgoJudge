@@ -42,12 +42,7 @@ pub struct JobConsumer {
 
 impl JobConsumer {
     /// Create a new job consumer.
-    pub fn new(
-        config: Config,
-        db: PgPool,
-        redis: RedisPool,
-        shutdown: Arc<AtomicBool>,
-    ) -> Self {
+    pub fn new(config: Config, db: PgPool, redis: RedisPool, shutdown: Arc<AtomicBool>) -> Self {
         let compiler = Compiler::new(config.clone());
         Self {
             config,
@@ -72,12 +67,8 @@ impl JobConsumer {
 
         // Create dead letter stream consumer group
         let dead_letter_stream = format!("{}_dead_letter", self.config.compile_stream);
-        self.create_consumer_group(
-            &mut conn,
-            &dead_letter_stream,
-            &self.config.consumer_group,
-        )
-        .await?;
+        self.create_consumer_group(&mut conn, &dead_letter_stream, &self.config.consumer_group)
+            .await?;
 
         Ok(())
     }
@@ -100,11 +91,7 @@ impl JobConsumer {
 
         match result {
             Ok(_) => {
-                tracing::info!(
-                    "Created consumer group '{}' on stream '{}'",
-                    group,
-                    stream
-                );
+                tracing::info!("Created consumer group '{}' on stream '{}'", group, stream);
             }
             Err(e) => {
                 if !e.to_string().contains("BUSYGROUP") {
@@ -443,7 +430,10 @@ impl JobConsumer {
 
         // Build CompileJob
         let submission_id = data.get("submission_id")?.parse().ok()?;
-        let job_type = data.get("type").cloned().unwrap_or_else(|| "zip".to_string());
+        let job_type = data
+            .get("type")
+            .cloned()
+            .unwrap_or_else(|| "zip".to_string());
         let file_path = data.get("file_path").cloned();
         let language = data.get("language").cloned();
         let retry_count = data

@@ -11,20 +11,18 @@ use sqlx::FromRow;
 use uuid::Uuid;
 use validator::Validate;
 
+use super::{
+    request::{
+        AddProblemToContestRequest, CreateProblemRequest, ListProblemsQuery, UpdateProblemRequest,
+    },
+    response::{
+        ContestProblemInfo, ContestProblemsResponse, MessageResponse, OwnerInfo, Pagination,
+        ProblemDetailResponse, ProblemListResponse, ProblemResponse, ProblemSummary,
+    },
+};
 use crate::error::{ApiError, ApiResult};
 use crate::middleware::auth::AuthUser;
 use crate::state::AppState;
-use super::{
-    request::{
-        AddProblemToContestRequest, CreateProblemRequest, ListProblemsQuery,
-        UpdateProblemRequest,
-    },
-    response::{
-        ContestProblemInfo, ContestProblemsResponse, MessageResponse, OwnerInfo,
-        Pagination, ProblemDetailResponse, ProblemListResponse, ProblemResponse,
-        ProblemSummary,
-    },
-};
 
 /// Database row for problem
 #[derive(Debug, FromRow)]
@@ -61,7 +59,7 @@ struct ProblemRow {
 // =============================================================================
 
 /// GET /api/v1/problems
-/// 
+///
 /// List problems with pagination and filtering.
 pub async fn list_problems(
     State(state): State<AppState>,
@@ -94,21 +92,35 @@ pub async fn list_problems(
         visibility_filter
     );
 
-    let rows: Vec<(Uuid, String, Option<String>, Option<Vec<String>>, i32, i32, i32, bool, i32, bool, DateTime<Utc>, Uuid, String, Option<String>)> = 
-        sqlx::query_as(&sql)
-            .bind(per_page as i64)
-            .bind(offset)
-            .fetch_all(&state.db)
-            .await
-            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
-
-    let total: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM problems WHERE is_public = true OR $1::boolean = false"
-    )
-        .bind(query.public_only)
-        .fetch_one(&state.db)
+    let rows: Vec<(
+        Uuid,
+        String,
+        Option<String>,
+        Option<Vec<String>>,
+        i32,
+        i32,
+        i32,
+        bool,
+        i32,
+        bool,
+        DateTime<Utc>,
+        Uuid,
+        String,
+        Option<String>,
+    )> = sqlx::query_as(&sql)
+        .bind(per_page as i64)
+        .bind(offset)
+        .fetch_all(&state.db)
         .await
         .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+
+    let total: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM problems WHERE is_public = true OR $1::boolean = false",
+    )
+    .bind(query.public_only)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
     let problems: Vec<ProblemSummary> = rows
         .into_iter()
@@ -146,14 +158,16 @@ pub async fn list_problems(
 }
 
 /// POST /api/v1/problems
-/// 
+///
 /// Create a new problem.
 pub async fn create_problem(
     State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
     Json(payload): Json<CreateProblemRequest>,
 ) -> ApiResult<(StatusCode, Json<ProblemResponse>)> {
-    payload.validate().map_err(|e| ApiError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| ApiError::Validation(e.to_string()))?;
 
     // Check user role (must be organizer or admin)
     if user.role != "admin" && user.role != "organizer" {
@@ -163,12 +177,10 @@ pub async fn create_problem(
     // Validate max_threads against system-wide cap
     let max_threads_limit = state.config.max_threads_limit;
     if payload.max_threads > max_threads_limit {
-        return Err(ApiError::Validation(
-            format!(
-                "max_threads ({}) exceeds the system limit of {}. Please set a value between 1 and {}.",
-                payload.max_threads, max_threads_limit, max_threads_limit
-            ),
-        ));
+        return Err(ApiError::Validation(format!(
+            "max_threads ({}) exceeds the system limit of {}. Please set a value between 1 and {}.",
+            payload.max_threads, max_threads_limit, max_threads_limit
+        )));
     }
 
     let id = Uuid::new_v4();
@@ -190,33 +202,33 @@ pub async fn create_problem(
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NULL, NULL,
             $15, $16, $17, $18, $19, $20, $21, $22, $22
         )
-        "#
+        "#,
     )
-        .bind(id)
-        .bind(&payload.title)
-        .bind(&payload.description)
-        .bind(&payload.input_format)
-        .bind(&payload.output_format)
-        .bind(&payload.constraints)
-        .bind(&payload.sample_input)
-        .bind(&payload.sample_output)
-        .bind(&payload.sample_explanation)
-        .bind(&difficulty)
-        .bind(&payload.tags)
-        .bind(payload.time_limit_ms)
-        .bind(payload.memory_limit_kb)
-        .bind(payload.num_test_cases)
-        .bind(payload.max_threads)
-        .bind(payload.network_allowed)
-        .bind(payload.max_score)
-        .bind(payload.partial_scoring)
-        .bind(payload.is_public)
-        .bind(&payload.allowed_languages)
-        .bind(user.id)
-        .bind(now)
-        .execute(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Failed to create problem: {}", e)))?;
+    .bind(id)
+    .bind(&payload.title)
+    .bind(&payload.description)
+    .bind(&payload.input_format)
+    .bind(&payload.output_format)
+    .bind(&payload.constraints)
+    .bind(&payload.sample_input)
+    .bind(&payload.sample_output)
+    .bind(&payload.sample_explanation)
+    .bind(&difficulty)
+    .bind(&payload.tags)
+    .bind(payload.time_limit_ms)
+    .bind(payload.memory_limit_kb)
+    .bind(payload.num_test_cases)
+    .bind(payload.max_threads)
+    .bind(payload.network_allowed)
+    .bind(payload.max_score)
+    .bind(payload.partial_scoring)
+    .bind(payload.is_public)
+    .bind(&payload.allowed_languages)
+    .bind(user.id)
+    .bind(now)
+    .execute(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Failed to create problem: {}", e)))?;
 
     Ok((
         StatusCode::CREATED,
@@ -247,22 +259,22 @@ pub async fn create_problem(
             owner_id: user.id,
             created_at: now,
             updated_at: now,
-            message: Some("Problem created. Upload generator and checker binaries to activate.".to_string()),
+            message: Some(
+                "Problem created. Upload generator and checker binaries to activate.".to_string(),
+            ),
         }),
     ))
 }
 
 /// GET /api/v1/problems/{id}
-/// 
+///
 /// Get problem details.
 pub async fn get_problem(
     State(state): State<AppState>,
     user: Option<Extension<AuthUser>>,
     Path(problem_id): Path<Uuid>,
 ) -> ApiResult<Json<ProblemDetailResponse>> {
-    let problem: Option<ProblemRow> = sqlx::query_as(
-        "SELECT * FROM problems WHERE id = $1"
-    )
+    let problem: Option<ProblemRow> = sqlx::query_as("SELECT * FROM problems WHERE id = $1")
         .bind(problem_id)
         .fetch_optional(&state.db)
         .await
@@ -279,13 +291,12 @@ pub async fn get_problem(
     }
 
     // Get owner info
-    let owner: (Uuid, String, Option<String>) = sqlx::query_as(
-        "SELECT id, username, display_name FROM users WHERE id = $1"
-    )
-        .bind(problem.owner_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+    let owner: (Uuid, String, Option<String>) =
+        sqlx::query_as("SELECT id, username, display_name FROM users WHERE id = $1")
+            .bind(problem.owner_id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
     let is_owner = user_id == Some(problem.owner_id);
 
@@ -306,8 +317,16 @@ pub async fn get_problem(
         max_threads: problem.max_threads,
         network_allowed: problem.network_allowed,
         num_test_cases: problem.num_test_cases,
-        generator_path: if is_owner || user_role == Some("admin") { problem.generator_path } else { None },
-        checker_path: if is_owner || user_role == Some("admin") { problem.checker_path } else { None },
+        generator_path: if is_owner || user_role == Some("admin") {
+            problem.generator_path
+        } else {
+            None
+        },
+        checker_path: if is_owner || user_role == Some("admin") {
+            problem.checker_path
+        } else {
+            None
+        },
         max_score: problem.max_score,
         partial_scoring: problem.partial_scoring,
         is_public: problem.is_public,
@@ -324,7 +343,7 @@ pub async fn get_problem(
 }
 
 /// PUT /api/v1/problems/{id}
-/// 
+///
 /// Update problem (owner or admin only).
 pub async fn update_problem(
     State(state): State<AppState>,
@@ -332,11 +351,11 @@ pub async fn update_problem(
     Path(problem_id): Path<Uuid>,
     Json(payload): Json<UpdateProblemRequest>,
 ) -> ApiResult<Json<ProblemResponse>> {
-    payload.validate().map_err(|e| ApiError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| ApiError::Validation(e.to_string()))?;
 
-    let problem: Option<ProblemRow> = sqlx::query_as(
-        "SELECT * FROM problems WHERE id = $1"
-    )
+    let problem: Option<ProblemRow> = sqlx::query_as("SELECT * FROM problems WHERE id = $1")
         .bind(problem_id)
         .fetch_optional(&state.db)
         .await
@@ -358,7 +377,10 @@ pub async fn update_problem(
     let sample_input = payload.sample_input.or(problem.sample_input);
     let sample_output = payload.sample_output.or(problem.sample_output);
     let sample_explanation = payload.sample_explanation.or(problem.sample_explanation);
-    let difficulty = payload.difficulty.map(|d| d.to_string()).or(problem.difficulty);
+    let difficulty = payload
+        .difficulty
+        .map(|d| d.to_string())
+        .or(problem.difficulty);
     let tags = payload.tags.or(problem.tags);
     let time_limit_ms = payload.time_limit_ms.unwrap_or(problem.time_limit_ms);
     let memory_limit_kb = payload.memory_limit_kb.unwrap_or(problem.memory_limit_kb);
@@ -369,12 +391,10 @@ pub async fn update_problem(
     // Validate max_threads against system-wide cap
     let max_threads_limit = state.config.max_threads_limit;
     if max_threads > max_threads_limit {
-        return Err(ApiError::Validation(
-            format!(
-                "max_threads ({}) exceeds the system limit of {}. Please set a value between 1 and {}.",
-                max_threads, max_threads_limit, max_threads_limit
-            ),
-        ));
+        return Err(ApiError::Validation(format!(
+            "max_threads ({}) exceeds the system limit of {}. Please set a value between 1 and {}.",
+            max_threads, max_threads_limit, max_threads_limit
+        )));
     }
 
     // Note: generator_path and checker_path are not updated here
@@ -395,37 +415,41 @@ pub async fn update_problem(
             num_test_cases = $14, max_threads = $15, network_allowed = $16, max_score = $17,
             partial_scoring = $18, is_public = $19, allowed_languages = $20, updated_at = $21
         WHERE id = $1
-        "#
+        "#,
     )
-        .bind(problem_id)
-        .bind(&title)
-        .bind(&description)
-        .bind(&input_format)
-        .bind(&output_format)
-        .bind(&constraints)
-        .bind(&sample_input)
-        .bind(&sample_output)
-        .bind(&sample_explanation)
-        .bind(&difficulty)
-        .bind(&tags)
-        .bind(time_limit_ms)
-        .bind(memory_limit_kb)
-        .bind(num_test_cases)
-        .bind(max_threads)
-        .bind(network_allowed)
-        .bind(max_score)
-        .bind(partial_scoring)
-        .bind(is_public)
-        .bind(&allowed_languages)
-        .bind(now)
-        .execute(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Failed to update problem: {}", e)))?;
+    .bind(problem_id)
+    .bind(&title)
+    .bind(&description)
+    .bind(&input_format)
+    .bind(&output_format)
+    .bind(&constraints)
+    .bind(&sample_input)
+    .bind(&sample_output)
+    .bind(&sample_explanation)
+    .bind(&difficulty)
+    .bind(&tags)
+    .bind(time_limit_ms)
+    .bind(memory_limit_kb)
+    .bind(num_test_cases)
+    .bind(max_threads)
+    .bind(network_allowed)
+    .bind(max_score)
+    .bind(partial_scoring)
+    .bind(is_public)
+    .bind(&allowed_languages)
+    .bind(now)
+    .execute(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Failed to update problem: {}", e)))?;
 
     // Determine problem status based on binary uploads
     let generator_uploaded = problem.generator_path.is_some();
     let checker_uploaded = problem.checker_path.is_some();
-    let status = if generator_uploaded && checker_uploaded { "ready" } else { "draft" };
+    let status = if generator_uploaded && checker_uploaded {
+        "ready"
+    } else {
+        "draft"
+    };
 
     Ok(Json(ProblemResponse {
         id: problem_id,
@@ -459,16 +483,14 @@ pub async fn update_problem(
 }
 
 /// DELETE /api/v1/problems/{id}
-/// 
+///
 /// Delete problem (owner or admin only).
 pub async fn delete_problem(
     State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
     Path(problem_id): Path<Uuid>,
 ) -> ApiResult<StatusCode> {
-    let problem: Option<(Uuid,)> = sqlx::query_as(
-        "SELECT owner_id FROM problems WHERE id = $1"
-    )
+    let problem: Option<(Uuid,)> = sqlx::query_as("SELECT owner_id FROM problems WHERE id = $1")
         .bind(problem_id)
         .fetch_optional(&state.db)
         .await
@@ -494,7 +516,7 @@ pub async fn delete_problem(
 // =============================================================================
 
 /// GET /api/v1/contests/{id}/problems
-/// 
+///
 /// List problems in a contest.
 pub async fn list_contest_problems(
     State(state): State<AppState>,
@@ -502,13 +524,12 @@ pub async fn list_contest_problems(
     Path(contest_id): Path<Uuid>,
 ) -> ApiResult<Json<ContestProblemsResponse>> {
     // Check contest exists
-    let contest: Option<(bool, DateTime<Utc>, Uuid)> = sqlx::query_as(
-        "SELECT is_public, start_time, owner_id FROM contests WHERE id = $1"
-    )
-        .bind(contest_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+    let contest: Option<(bool, DateTime<Utc>, Uuid)> =
+        sqlx::query_as("SELECT is_public, start_time, owner_id FROM contests WHERE id = $1")
+            .bind(contest_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
     let contest = contest.ok_or(ApiError::NotFound("Contest not found".to_string()))?;
 
@@ -518,21 +539,19 @@ pub async fn list_contest_problems(
 
     // Check if user can view problems
     // Problems visible if: contest started, or user is owner/admin/collaborator
-    let can_view = now >= contest.1 
-        || user_id == Some(contest.2) 
-        || user_role == Some("admin");
+    let can_view = now >= contest.1 || user_id == Some(contest.2) || user_role == Some("admin");
 
     if !can_view {
         // Check if collaborator
         if let Some(uid) = user_id {
             let is_collab: Option<(i64,)> = sqlx::query_as(
-                "SELECT 1 FROM contest_collaborators WHERE contest_id = $1 AND user_id = $2"
+                "SELECT 1 FROM contest_collaborators WHERE contest_id = $1 AND user_id = $2",
             )
-                .bind(contest_id)
-                .bind(uid)
-                .fetch_optional(&state.db)
-                .await
-                .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+            .bind(contest_id)
+            .bind(uid)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
             if is_collab.is_none() {
                 return Err(ApiError::Forbidden);
@@ -542,7 +561,19 @@ pub async fn list_contest_problems(
         }
     }
 
-    let rows: Vec<(Uuid, Uuid, String, String, Option<String>, i32, i32, i32, bool, i32, i32)> = sqlx::query_as(
+    let rows: Vec<(
+        Uuid,
+        Uuid,
+        String,
+        String,
+        Option<String>,
+        i32,
+        i32,
+        i32,
+        bool,
+        i32,
+        i32,
+    )> = sqlx::query_as(
         r#"
         SELECT 
             cp.id, cp.problem_id, cp.problem_code, p.title, p.difficulty,
@@ -556,12 +587,12 @@ pub async fn list_contest_problems(
         JOIN problems p ON cp.problem_id = p.id
         WHERE cp.contest_id = $1
         ORDER BY cp.sort_order, cp.problem_code
-        "#
+        "#,
     )
-        .bind(contest_id)
-        .fetch_all(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+    .bind(contest_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
     let problems: Vec<ContestProblemInfo> = rows
         .into_iter()
@@ -584,7 +615,7 @@ pub async fn list_contest_problems(
 }
 
 /// POST /api/v1/contests/{id}/problems
-/// 
+///
 /// Add a problem to contest.
 pub async fn add_problem_to_contest(
     State(state): State<AppState>,
@@ -592,12 +623,12 @@ pub async fn add_problem_to_contest(
     Path(contest_id): Path<Uuid>,
     Json(payload): Json<AddProblemToContestRequest>,
 ) -> ApiResult<(StatusCode, Json<ContestProblemInfo>)> {
-    payload.validate().map_err(|e| ApiError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| ApiError::Validation(e.to_string()))?;
 
     // Check contest exists and user has permission
-    let contest: Option<(Uuid,)> = sqlx::query_as(
-        "SELECT owner_id FROM contests WHERE id = $1"
-    )
+    let contest: Option<(Uuid,)> = sqlx::query_as("SELECT owner_id FROM contests WHERE id = $1")
         .bind(contest_id)
         .fetch_optional(&state.db)
         .await
@@ -655,31 +686,34 @@ pub async fn add_problem_to_contest(
     let problem = problem.ok_or(ApiError::NotFound("Problem not found".to_string()))?;
 
     // Check if problem already in contest
-    let existing: Option<(i64,)> = sqlx::query_as(
-        "SELECT 1 FROM contest_problems WHERE contest_id = $1 AND problem_id = $2"
-    )
-        .bind(contest_id)
-        .bind(payload.problem_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+    let existing: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM contest_problems WHERE contest_id = $1 AND problem_id = $2")
+            .bind(contest_id)
+            .bind(payload.problem_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
     if existing.is_some() {
-        return Err(ApiError::Validation("Problem already in contest".to_string()));
+        return Err(ApiError::Validation(
+            "Problem already in contest".to_string(),
+        ));
     }
 
     // Check if problem code already used
     let code_exists: Option<(i64,)> = sqlx::query_as(
-        "SELECT 1 FROM contest_problems WHERE contest_id = $1 AND problem_code = $2"
+        "SELECT 1 FROM contest_problems WHERE contest_id = $1 AND problem_code = $2",
     )
-        .bind(contest_id)
-        .bind(&payload.problem_code)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+    .bind(contest_id)
+    .bind(&payload.problem_code)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
     if code_exists.is_some() {
-        return Err(ApiError::Validation("Problem code already used in contest".to_string()));
+        return Err(ApiError::Validation(
+            "Problem code already used in contest".to_string(),
+        ));
     }
 
     let id = Uuid::new_v4();
@@ -693,23 +727,23 @@ pub async fn add_problem_to_contest(
             max_score, time_limit_ms, memory_limit_kb, max_threads, network_allowed,
             added_at, added_by
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-        "#
+        "#,
     )
-        .bind(id)
-        .bind(contest_id)
-        .bind(payload.problem_id)
-        .bind(&payload.problem_code)
-        .bind(sort_order)
-        .bind(payload.max_score)
-        .bind(payload.time_limit_ms)
-        .bind(payload.memory_limit_kb)
-        .bind(payload.max_threads)
-        .bind(payload.network_allowed)
-        .bind(now)
-        .bind(user.id)
-        .execute(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Failed to add problem: {}", e)))?;
+    .bind(id)
+    .bind(contest_id)
+    .bind(payload.problem_id)
+    .bind(&payload.problem_code)
+    .bind(sort_order)
+    .bind(payload.max_score)
+    .bind(payload.time_limit_ms)
+    .bind(payload.memory_limit_kb)
+    .bind(payload.max_threads)
+    .bind(payload.network_allowed)
+    .bind(now)
+    .bind(user.id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Failed to add problem: {}", e)))?;
 
     Ok((
         StatusCode::CREATED,
@@ -730,7 +764,7 @@ pub async fn add_problem_to_contest(
 }
 
 /// DELETE /api/v1/contests/{id}/problems/{problem_id}
-/// 
+///
 /// Remove a problem from contest.
 pub async fn remove_problem_from_contest(
     State(state): State<AppState>,
@@ -738,9 +772,7 @@ pub async fn remove_problem_from_contest(
     Path((contest_id, problem_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<StatusCode> {
     // Check contest exists and user has permission
-    let contest: Option<(Uuid,)> = sqlx::query_as(
-        "SELECT owner_id FROM contests WHERE id = $1"
-    )
+    let contest: Option<(Uuid,)> = sqlx::query_as("SELECT owner_id FROM contests WHERE id = $1")
         .bind(contest_id)
         .fetch_optional(&state.db)
         .await
@@ -768,14 +800,13 @@ pub async fn remove_problem_from_contest(
         return Err(ApiError::Forbidden);
     }
 
-    let result = sqlx::query(
-        "DELETE FROM contest_problems WHERE contest_id = $1 AND problem_id = $2"
-    )
-        .bind(contest_id)
-        .bind(problem_id)
-        .execute(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Failed to remove problem: {}", e)))?;
+    let result =
+        sqlx::query("DELETE FROM contest_problems WHERE contest_id = $1 AND problem_id = $2")
+            .bind(contest_id)
+            .bind(problem_id)
+            .execute(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Failed to remove problem: {}", e)))?;
 
     if result.rows_affected() == 0 {
         return Err(ApiError::NotFound("Problem not in contest".to_string()));
@@ -803,7 +834,7 @@ fn validate_elf_binary(data: &[u8]) -> Result<(), ApiError> {
 }
 
 /// Check if user has permission to access/modify problem binaries.
-/// 
+///
 /// Access is granted to:
 /// 1. Admins (role = "admin")
 /// 2. Problem owner (owner_id matches user.id)
@@ -820,13 +851,11 @@ async fn check_problem_binary_permission(
     }
 
     // Check if user is the problem owner
-    let owner_id: Option<Uuid> = sqlx::query_scalar(
-        "SELECT owner_id FROM problems WHERE id = $1"
-    )
-    .bind(problem_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+    let owner_id: Option<Uuid> = sqlx::query_scalar("SELECT owner_id FROM problems WHERE id = $1")
+        .bind(problem_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
     match owner_id {
         Some(id) if id == user.id => return Ok(()),
@@ -842,7 +871,7 @@ async fn check_problem_binary_permission(
             JOIN contests c ON c.id = cp.contest_id
             WHERE cp.problem_id = $1 AND c.owner_id = $2
         )
-        "#
+        "#,
     )
     .bind(problem_id)
     .bind(user.id)
@@ -865,7 +894,7 @@ async fn check_problem_binary_permission(
               AND cc.user_id = $2
               AND cc.can_add_problems = true
         )
-        "#
+        "#,
     )
     .bind(problem_id)
     .bind(user.id)
@@ -883,14 +912,15 @@ async fn check_problem_binary_permission(
 /// When both generator and checker binaries exist for a problem,
 /// find all submissions in `queue_pending` status for that problem
 /// and re-queue them on the `run_queue` Redis Stream for judging.
-async fn requeue_pending_submissions(
-    state: &AppState,
-    problem_id: Uuid,
-) -> ApiResult<u64> {
+async fn requeue_pending_submissions(state: &AppState, problem_id: Uuid) -> ApiResult<u64> {
     // Check if both binaries now exist
     let dir_path = format!("/mnt/data/binaries/problems/{}", problem_id);
-    let generator_exists = tokio::fs::metadata(format!("{}/generator", dir_path)).await.is_ok();
-    let checker_exists = tokio::fs::metadata(format!("{}/checker", dir_path)).await.is_ok();
+    let generator_exists = tokio::fs::metadata(format!("{}/generator", dir_path))
+        .await
+        .is_ok();
+    let checker_exists = tokio::fs::metadata(format!("{}/checker", dir_path))
+        .await
+        .is_ok();
 
     if !generator_exists || !checker_exists {
         return Ok(0);
@@ -929,10 +959,7 @@ async fn requeue_pending_submissions(
 
     for sub in &pending_submissions {
         // Look up the user binary path
-        let binary_path = format!(
-            "/mnt/data/binaries/users/{}_bin",
-            sub.submission_id
-        );
+        let binary_path = format!("/mnt/data/binaries/users/{}_bin", sub.submission_id);
 
         // Push to run_queue
         let _: String = redis::cmd("XADD")
@@ -956,12 +983,10 @@ async fn requeue_pending_submissions(
             .await?;
 
         // Update status back to compiled
-        sqlx::query(
-            "UPDATE submissions SET status = 'compiled' WHERE id = $1"
-        )
-        .bind(sub.submission_id)
-        .execute(&state.db)
-        .await?;
+        sqlx::query("UPDATE submissions SET status = 'compiled' WHERE id = $1")
+            .bind(sub.submission_id)
+            .execute(&state.db)
+            .await?;
 
         requeued += 1;
     }
@@ -993,7 +1018,7 @@ struct PendingSubmissionRow {
 }
 
 /// POST /api/v1/problems/{id}/generator
-/// 
+///
 /// Upload generator binary for a problem.
 /// The binary will be stored at /mnt/data/binaries/problems/{problem_id}/generator
 pub async fn upload_generator(
@@ -1008,28 +1033,31 @@ pub async fn upload_generator(
     // Process multipart upload
     let mut file_data: Option<Vec<u8>> = None;
 
-    while let Some(field) = multipart.next_field().await.map_err(|e| {
-        ApiError::Validation(format!("Failed to read multipart: {}", e))
-    })? {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| ApiError::Validation(format!("Failed to read multipart: {}", e)))?
+    {
         let name = field.name().unwrap_or_default().to_string();
         if name == "file" {
-            let data = field.bytes().await.map_err(|e| {
-                ApiError::Validation(format!("Failed to read file: {}", e))
-            })?;
+            let data = field
+                .bytes()
+                .await
+                .map_err(|e| ApiError::Validation(format!("Failed to read file: {}", e)))?;
 
             if data.len() > MAX_BINARY_SIZE {
-                return Err(ApiError::Validation(
-                    format!("File size exceeds {}MB limit", MAX_BINARY_SIZE / 1024 / 1024)
-                ));
+                return Err(ApiError::Validation(format!(
+                    "File size exceeds {}MB limit",
+                    MAX_BINARY_SIZE / 1024 / 1024
+                )));
             }
 
             file_data = Some(data.to_vec());
         }
     }
 
-    let file_data = file_data.ok_or_else(|| {
-        ApiError::Validation("No file uploaded".to_string())
-    })?;
+    let file_data =
+        file_data.ok_or_else(|| ApiError::Validation("No file uploaded".to_string()))?;
 
     // Validate it's an ELF binary
     validate_elf_binary(&file_data)?;
@@ -1038,33 +1066,31 @@ pub async fn upload_generator(
     let dir_path = format!("/mnt/data/binaries/problems/{}", problem_id);
     let file_path = format!("{}/generator", dir_path);
 
-    tokio::fs::create_dir_all(&dir_path).await.map_err(|e| {
-        ApiError::Internal(format!("Failed to create directory: {}", e))
-    })?;
+    tokio::fs::create_dir_all(&dir_path)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to create directory: {}", e)))?;
 
-    tokio::fs::write(&file_path, &file_data).await.map_err(|e| {
-        ApiError::Internal(format!("Failed to save generator: {}", e))
-    })?;
+    tokio::fs::write(&file_path, &file_data)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to save generator: {}", e)))?;
 
     // Make executable
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let perms = std::fs::Permissions::from_mode(0o755);
-        tokio::fs::set_permissions(&file_path, perms).await.map_err(|e| {
-            ApiError::Internal(format!("Failed to set permissions: {}", e))
-        })?;
+        tokio::fs::set_permissions(&file_path, perms)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Failed to set permissions: {}", e)))?;
     }
 
     // Update database with path
-    sqlx::query(
-        "UPDATE problems SET generator_path = $1, updated_at = NOW() WHERE id = $2"
-    )
-    .bind(&file_path)
-    .bind(problem_id)
-    .execute(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(format!("Failed to update problem: {}", e)))?;
+    sqlx::query("UPDATE problems SET generator_path = $1, updated_at = NOW() WHERE id = $2")
+        .bind(&file_path)
+        .bind(problem_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to update problem: {}", e)))?;
 
     tracing::info!(
         problem_id = %problem_id,
@@ -1077,18 +1103,19 @@ pub async fn upload_generator(
     let requeued = requeue_pending_submissions(&state, problem_id).await?;
 
     let msg = if requeued > 0 {
-        format!("Generator uploaded successfully. {} pending submission(s) re-queued for judging.", requeued)
+        format!(
+            "Generator uploaded successfully. {} pending submission(s) re-queued for judging.",
+            requeued
+        )
     } else {
         "Generator uploaded successfully".to_string()
     };
 
-    Ok(Json(MessageResponse {
-        message: msg,
-    }))
+    Ok(Json(MessageResponse { message: msg }))
 }
 
 /// POST /api/v1/problems/{id}/checker
-/// 
+///
 /// Upload checker/verifier binary for a problem.
 /// The binary will be stored at /mnt/data/binaries/problems/{problem_id}/checker
 pub async fn upload_checker(
@@ -1103,28 +1130,31 @@ pub async fn upload_checker(
     // Process multipart upload
     let mut file_data: Option<Vec<u8>> = None;
 
-    while let Some(field) = multipart.next_field().await.map_err(|e| {
-        ApiError::Validation(format!("Failed to read multipart: {}", e))
-    })? {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| ApiError::Validation(format!("Failed to read multipart: {}", e)))?
+    {
         let name = field.name().unwrap_or_default().to_string();
         if name == "file" {
-            let data = field.bytes().await.map_err(|e| {
-                ApiError::Validation(format!("Failed to read file: {}", e))
-            })?;
+            let data = field
+                .bytes()
+                .await
+                .map_err(|e| ApiError::Validation(format!("Failed to read file: {}", e)))?;
 
             if data.len() > MAX_BINARY_SIZE {
-                return Err(ApiError::Validation(
-                    format!("File size exceeds {}MB limit", MAX_BINARY_SIZE / 1024 / 1024)
-                ));
+                return Err(ApiError::Validation(format!(
+                    "File size exceeds {}MB limit",
+                    MAX_BINARY_SIZE / 1024 / 1024
+                )));
             }
 
             file_data = Some(data.to_vec());
         }
     }
 
-    let file_data = file_data.ok_or_else(|| {
-        ApiError::Validation("No file uploaded".to_string())
-    })?;
+    let file_data =
+        file_data.ok_or_else(|| ApiError::Validation("No file uploaded".to_string()))?;
 
     // Validate it's an ELF binary
     validate_elf_binary(&file_data)?;
@@ -1133,33 +1163,31 @@ pub async fn upload_checker(
     let dir_path = format!("/mnt/data/binaries/problems/{}", problem_id);
     let file_path = format!("{}/checker", dir_path);
 
-    tokio::fs::create_dir_all(&dir_path).await.map_err(|e| {
-        ApiError::Internal(format!("Failed to create directory: {}", e))
-    })?;
+    tokio::fs::create_dir_all(&dir_path)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to create directory: {}", e)))?;
 
-    tokio::fs::write(&file_path, &file_data).await.map_err(|e| {
-        ApiError::Internal(format!("Failed to save checker: {}", e))
-    })?;
+    tokio::fs::write(&file_path, &file_data)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to save checker: {}", e)))?;
 
     // Make executable
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let perms = std::fs::Permissions::from_mode(0o755);
-        tokio::fs::set_permissions(&file_path, perms).await.map_err(|e| {
-            ApiError::Internal(format!("Failed to set permissions: {}", e))
-        })?;
+        tokio::fs::set_permissions(&file_path, perms)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Failed to set permissions: {}", e)))?;
     }
 
     // Update database with path
-    sqlx::query(
-        "UPDATE problems SET checker_path = $1, updated_at = NOW() WHERE id = $2"
-    )
-    .bind(&file_path)
-    .bind(problem_id)
-    .execute(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(format!("Failed to update problem: {}", e)))?;
+    sqlx::query("UPDATE problems SET checker_path = $1, updated_at = NOW() WHERE id = $2")
+        .bind(&file_path)
+        .bind(problem_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to update problem: {}", e)))?;
 
     tracing::info!(
         problem_id = %problem_id,
@@ -1172,18 +1200,19 @@ pub async fn upload_checker(
     let requeued = requeue_pending_submissions(&state, problem_id).await?;
 
     let msg = if requeued > 0 {
-        format!("Checker uploaded successfully. {} pending submission(s) re-queued for judging.", requeued)
+        format!(
+            "Checker uploaded successfully. {} pending submission(s) re-queued for judging.",
+            requeued
+        )
     } else {
         "Checker uploaded successfully".to_string()
     };
 
-    Ok(Json(MessageResponse {
-        message: msg,
-    }))
+    Ok(Json(MessageResponse { message: msg }))
 }
 
 /// GET /api/v1/problems/{id}/generator
-/// 
+///
 /// Download generator binary for a problem.
 pub async fn download_generator(
     State(state): State<AppState>,
@@ -1192,38 +1221,42 @@ pub async fn download_generator(
 ) -> ApiResult<axum::response::Response> {
     use axum::body::Body;
     use axum::response::IntoResponse;
-    
+
     // Check permission
     check_problem_binary_permission(&state, problem_id, &user).await?;
 
     // Get file path from database
-    let path: Option<String> = sqlx::query_scalar(
-        "SELECT generator_path FROM problems WHERE id = $1"
-    )
-    .bind(problem_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?
-    .flatten();
+    let path: Option<String> =
+        sqlx::query_scalar("SELECT generator_path FROM problems WHERE id = $1")
+            .bind(problem_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?
+            .flatten();
 
-    let path = path.ok_or_else(|| {
-        ApiError::NotFound("Generator not uploaded for this problem".to_string())
-    })?;
+    let path = path
+        .ok_or_else(|| ApiError::NotFound("Generator not uploaded for this problem".to_string()))?;
 
     // Read file
-    let data = tokio::fs::read(&path).await.map_err(|e| {
-        ApiError::Internal(format!("Failed to read generator: {}", e))
-    })?;
+    let data = tokio::fs::read(&path)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to read generator: {}", e)))?;
 
     Ok((
-        [(axum::http::header::CONTENT_TYPE, "application/octet-stream"),
-         (axum::http::header::CONTENT_DISPOSITION, "attachment; filename=\"generator\"")],
-        Body::from(data)
-    ).into_response())
+        [
+            (axum::http::header::CONTENT_TYPE, "application/octet-stream"),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                "attachment; filename=\"generator\"",
+            ),
+        ],
+        Body::from(data),
+    )
+        .into_response())
 }
 
 /// GET /api/v1/problems/{id}/checker
-/// 
+///
 /// Download checker binary for a problem.
 pub async fn download_checker(
     State(state): State<AppState>,
@@ -1232,34 +1265,38 @@ pub async fn download_checker(
 ) -> ApiResult<axum::response::Response> {
     use axum::body::Body;
     use axum::response::IntoResponse;
-    
+
     // Check permission
     check_problem_binary_permission(&state, problem_id, &user).await?;
 
     // Get file path from database
-    let path: Option<String> = sqlx::query_scalar(
-        "SELECT checker_path FROM problems WHERE id = $1"
-    )
-    .bind(problem_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?
-    .flatten();
+    let path: Option<String> =
+        sqlx::query_scalar("SELECT checker_path FROM problems WHERE id = $1")
+            .bind(problem_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?
+            .flatten();
 
-    let path = path.ok_or_else(|| {
-        ApiError::NotFound("Checker not uploaded for this problem".to_string())
-    })?;
+    let path = path
+        .ok_or_else(|| ApiError::NotFound("Checker not uploaded for this problem".to_string()))?;
 
     // Read file
-    let data = tokio::fs::read(&path).await.map_err(|e| {
-        ApiError::Internal(format!("Failed to read checker: {}", e))
-    })?;
+    let data = tokio::fs::read(&path)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to read checker: {}", e)))?;
 
     Ok((
-        [(axum::http::header::CONTENT_TYPE, "application/octet-stream"),
-         (axum::http::header::CONTENT_DISPOSITION, "attachment; filename=\"checker\"")],
-        Body::from(data)
-    ).into_response())
+        [
+            (axum::http::header::CONTENT_TYPE, "application/octet-stream"),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                "attachment; filename=\"checker\"",
+            ),
+        ],
+        Body::from(data),
+    )
+        .into_response())
 }
 
 /// Create routes for problems

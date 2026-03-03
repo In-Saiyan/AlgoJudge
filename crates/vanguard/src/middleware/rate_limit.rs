@@ -54,10 +54,7 @@ pub async fn check_rate_limit(
     let mut conn = state.redis.get().await?;
 
     // Increment counter
-    let count: u64 = redis::cmd("INCR")
-        .arg(key)
-        .query_async(&mut conn)
-        .await?;
+    let count: u64 = redis::cmd("INCR").arg(key).query_async(&mut conn).await?;
 
     // Set expiry on first request
     if count == 1 {
@@ -69,10 +66,7 @@ pub async fn check_rate_limit(
     }
 
     // Get TTL for reset time
-    let ttl: i64 = redis::cmd("TTL")
-        .arg(key)
-        .query_async(&mut conn)
-        .await?;
+    let ttl: i64 = redis::cmd("TTL").arg(key).query_async(&mut conn).await?;
 
     Ok(RateLimitInfo {
         limit,
@@ -85,18 +79,12 @@ pub async fn check_rate_limit(
 /// Add rate limit headers to response
 fn add_rate_limit_headers(response: &mut Response, info: &RateLimitInfo) {
     let headers = response.headers_mut();
-    headers.insert(
-        "X-RateLimit-Limit",
-        info.limit.to_string().parse().unwrap(),
-    );
+    headers.insert("X-RateLimit-Limit", info.limit.to_string().parse().unwrap());
     headers.insert(
         "X-RateLimit-Remaining",
         info.remaining.to_string().parse().unwrap(),
     );
-    headers.insert(
-        "X-RateLimit-Reset",
-        info.reset.to_string().parse().unwrap(),
-    );
+    headers.insert("X-RateLimit-Reset", info.reset.to_string().parse().unwrap());
 }
 
 /// Create rate limit exceeded response
@@ -104,10 +92,7 @@ fn rate_limit_response(info: &RateLimitInfo) -> Response {
     let body = ApiErrorResponse {
         error: ApiErrorBody {
             code: "RATE_LIMIT_EXCEEDED",
-            message: format!(
-                "Rate limit exceeded. Try again in {} seconds.",
-                info.reset
-            ),
+            message: format!("Rate limit exceeded. Try again in {} seconds.", info.reset),
             details: None,
         },
     };

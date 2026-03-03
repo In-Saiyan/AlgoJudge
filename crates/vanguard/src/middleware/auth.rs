@@ -21,7 +21,7 @@ pub struct AuthUser {
 }
 
 /// Authentication middleware.
-/// 
+///
 /// Extracts and validates JWT token from Authorization header.
 pub async fn auth_middleware(
     State(state): State<AppState>,
@@ -60,7 +60,7 @@ pub async fn auth_middleware(
 }
 
 /// Optional authentication middleware.
-/// 
+///
 /// Extracts JWT if present but doesn't fail if missing.
 #[allow(dead_code)]
 pub async fn optional_auth_middleware(
@@ -95,7 +95,7 @@ pub async fn optional_auth_middleware(
 }
 
 /// Admin-only middleware.
-/// 
+///
 /// Requires the user to have admin role.
 pub async fn admin_middleware(
     State(_state): State<AppState>,
@@ -115,7 +115,7 @@ pub async fn admin_middleware(
 }
 
 /// Organizer or Admin middleware.
-/// 
+///
 /// Requires the user to have admin or organizer role.
 #[allow(dead_code)]
 pub async fn organizer_middleware(

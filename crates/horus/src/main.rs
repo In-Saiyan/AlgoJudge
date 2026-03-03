@@ -19,7 +19,7 @@ use anyhow::Result;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config::Config;
-use crate::config_reload::{PolicyStore, start_config_reload_listener};
+use crate::config_reload::{start_config_reload_listener, PolicyStore};
 use crate::scheduler::CleanupScheduler;
 
 #[tokio::main]
@@ -80,7 +80,10 @@ async fn main() -> Result<()> {
     let policy_store = PolicyStore::new();
     match policy_store.load_from_db(&db_pool).await {
         Ok(count) => tracing::info!("Loaded {} initial policies from database", count),
-        Err(e) => tracing::warn!("Could not load policies from database (table may not exist yet): {}", e),
+        Err(e) => tracing::warn!(
+            "Could not load policies from database (table may not exist yet): {}",
+            e
+        ),
     }
 
     // Start Redis pub/sub listener for config reload

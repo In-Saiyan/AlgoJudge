@@ -10,7 +10,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Factory function type for creating specifications from parameters.
-pub type SpecFactory<Ctx> = Arc<dyn Fn(&HashMap<String, Value>) -> Option<BoxedSpec<Ctx>> + Send + Sync>;
+pub type SpecFactory<Ctx> =
+    Arc<dyn Fn(&HashMap<String, Value>) -> Option<BoxedSpec<Ctx>> + Send + Sync>;
 
 /// Registry for dynamically building specifications from configuration.
 ///
@@ -86,14 +87,10 @@ impl<Ctx: Send + Sync + 'static> SpecRegistry<Ctx> {
     /// if parameters are invalid.
     pub fn build(&self, config: &RuleConfig) -> Option<BoxedSpec<Ctx>> {
         match config {
-            RuleConfig::Spec { name, params } => {
-                self.create(name, params)
-            }
+            RuleConfig::Spec { name, params } => self.create(name, params),
             RuleConfig::And { rules } => {
-                let specs: Option<Vec<BoxedSpec<Ctx>>> = rules
-                    .iter()
-                    .map(|r| self.build(r))
-                    .collect();
+                let specs: Option<Vec<BoxedSpec<Ctx>>> =
+                    rules.iter().map(|r| self.build(r)).collect();
                 let specs = specs?;
                 if specs.is_empty() {
                     return None;
@@ -101,10 +98,8 @@ impl<Ctx: Send + Sync + 'static> SpecRegistry<Ctx> {
                 Some(Arc::new(AllOf::new(specs)))
             }
             RuleConfig::Or { rules } => {
-                let specs: Option<Vec<BoxedSpec<Ctx>>> = rules
-                    .iter()
-                    .map(|r| self.build(r))
-                    .collect();
+                let specs: Option<Vec<BoxedSpec<Ctx>>> =
+                    rules.iter().map(|r| self.build(r)).collect();
                 let specs = specs?;
                 if specs.is_empty() {
                     return None;
@@ -202,6 +197,8 @@ pub fn execution_context_registry() -> SpecRegistry<ExecutionContext> {
 
     registry.register("OutputMatches", |_| Some(Arc::new(OutputMatches)));
 
+    registry.register("AcceptedVerdict", |_| Some(Arc::new(AcceptedVerdict)));
+
     registry
 }
 
@@ -262,7 +259,7 @@ mod tests {
     #[test]
     fn test_file_registry_basic() {
         let registry = file_context_registry();
-        
+
         assert!(registry.contains("IsFile"));
         assert!(registry.contains("LastAccessOlderThan"));
         assert!(!registry.contains("NonExistent"));
@@ -271,17 +268,17 @@ mod tests {
     #[test]
     fn test_file_registry_create() {
         let registry = file_context_registry();
-        
+
         // Parameterless spec
         let spec = registry.create("IsFile", &HashMap::new());
         assert!(spec.is_some());
-        
+
         // Spec with params
         let mut params = HashMap::new();
         params.insert("hours".to_string(), serde_json::json!(6));
         let spec = registry.create("LastAccessOlderThan", &params);
         assert!(spec.is_some());
-        
+
         // Invalid params
         let mut bad_params = HashMap::new();
         bad_params.insert("wrong".to_string(), serde_json::json!("key"));
@@ -292,10 +289,10 @@ mod tests {
     #[test]
     fn test_build_from_config() {
         let registry = file_context_registry();
-        
+
         let mut params = HashMap::new();
         params.insert("hours".to_string(), serde_json::json!(6));
-        
+
         let config = RuleConfig::And {
             rules: vec![
                 RuleConfig::Spec {
@@ -308,7 +305,7 @@ mod tests {
                 },
             ],
         };
-        
+
         let spec = registry.build(&config);
         assert!(spec.is_some());
     }
@@ -316,19 +313,17 @@ mod tests {
     #[test]
     fn test_validate_config() {
         let registry = file_context_registry();
-        
+
         // Valid config
         let config = RuleConfig::And {
-            rules: vec![
-                RuleConfig::Spec {
-                    name: "IsFile".to_string(),
-                    params: HashMap::new(),
-                },
-            ],
+            rules: vec![RuleConfig::Spec {
+                name: "IsFile".to_string(),
+                params: HashMap::new(),
+            }],
         };
         let errors = registry.validate(&config);
         assert!(errors.is_empty());
-        
+
         // Invalid config - unknown spec
         let bad_config = RuleConfig::Spec {
             name: "UnknownSpec".to_string(),
@@ -343,7 +338,7 @@ mod tests {
     fn test_list_specs() {
         let registry = file_context_registry();
         let specs = registry.list();
-        
+
         assert!(specs.contains(&"IsFile"));
         assert!(specs.contains(&"IsDirectory"));
         assert!(specs.contains(&"LastAccessOlderThan"));

@@ -10,24 +10,23 @@ use sqlx::FromRow;
 use uuid::Uuid;
 use validator::Validate;
 
+use super::{
+    request::{
+        AddCollaboratorRequest, CreateContestRequest, ListContestsQuery, ListParticipantsQuery,
+        UpdateContestRequest,
+    },
+    response::{
+        CollaboratorInfo, CollaboratorListResponse, ContestDetailResponse, ContestListResponse,
+        ContestResponse, ContestSummary, MessageResponse, OwnerInfo, Pagination, ParticipantInfo,
+        ParticipantListResponse, RegistrationResponse,
+    },
+};
 use crate::domain::authorization::{
     build_contest_context, require_contest_modify_access, require_organizer,
 };
 use crate::error::{ApiError, ApiResult};
 use crate::middleware::auth::AuthUser;
 use crate::state::AppState;
-use super::{
-    request::{
-        AddCollaboratorRequest, CreateContestRequest, ListContestsQuery,
-        ListParticipantsQuery, UpdateContestRequest,
-    },
-    response::{
-        CollaboratorInfo, CollaboratorListResponse, ContestDetailResponse,
-        ContestListResponse, ContestResponse, ContestSummary, MessageResponse,
-        OwnerInfo, Pagination, ParticipantInfo, ParticipantListResponse,
-        RegistrationResponse,
-    },
-};
 
 /// Database row for contest with owner info
 #[derive(Debug, FromRow)]
@@ -67,7 +66,7 @@ fn get_contest_status(start_time: DateTime<Utc>, end_time: DateTime<Utc>) -> Str
 // =============================================================================
 
 /// GET /api/v1/contests
-/// 
+///
 /// List contests with pagination and filtering.
 pub async fn list_contests(
     State(state): State<AppState>,
@@ -142,94 +141,90 @@ pub async fn list_contests(
     // Execute queries based on parameters
     let search_pattern = query.search.as_ref().map(|s| format!("%{}%", s));
 
-    let rows: Vec<(Uuid, String, Option<String>, DateTime<Utc>, DateTime<Utc>, String, bool, bool, Uuid, String, Option<String>, i64)> = 
-        match (&query.status, &search_pattern, &query.owner_id) {
-            (Some(_), Some(search), Some(owner)) => {
-                sqlx::query_as(&sql)
-                    .bind(per_page as i64)
-                    .bind(offset)
-                    .bind(now)
-                    .bind(search)
-                    .bind(owner)
-                    .fetch_all(&state.db)
-                    .await
-                    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?
-            }
-            (Some(_), Some(search), None) => {
-                sqlx::query_as(&sql)
-                    .bind(per_page as i64)
-                    .bind(offset)
-                    .bind(now)
-                    .bind(search)
-                    .fetch_all(&state.db)
-                    .await
-                    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?
-            }
-            (Some(_), None, Some(owner)) => {
-                sqlx::query_as(&sql)
-                    .bind(per_page as i64)
-                    .bind(offset)
-                    .bind(now)
-                    .bind(owner)
-                    .fetch_all(&state.db)
-                    .await
-                    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?
-            }
-            (Some(_), None, None) => {
-                sqlx::query_as(&sql)
-                    .bind(per_page as i64)
-                    .bind(offset)
-                    .bind(now)
-                    .fetch_all(&state.db)
-                    .await
-                    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?
-            }
-            (None, Some(search), Some(owner)) => {
-                sqlx::query_as(&sql)
-                    .bind(per_page as i64)
-                    .bind(offset)
-                    .bind(search)
-                    .bind(owner)
-                    .fetch_all(&state.db)
-                    .await
-                    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?
-            }
-            (None, Some(search), None) => {
-                sqlx::query_as(&sql)
-                    .bind(per_page as i64)
-                    .bind(offset)
-                    .bind(search)
-                    .fetch_all(&state.db)
-                    .await
-                    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?
-            }
-            (None, None, Some(owner)) => {
-                sqlx::query_as(&sql)
-                    .bind(per_page as i64)
-                    .bind(offset)
-                    .bind(owner)
-                    .fetch_all(&state.db)
-                    .await
-                    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?
-            }
-            (None, None, None) => {
-                sqlx::query_as(&sql)
-                    .bind(per_page as i64)
-                    .bind(offset)
-                    .fetch_all(&state.db)
-                    .await
-                    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?
-            }
-        };
+    let rows: Vec<(
+        Uuid,
+        String,
+        Option<String>,
+        DateTime<Utc>,
+        DateTime<Utc>,
+        String,
+        bool,
+        bool,
+        Uuid,
+        String,
+        Option<String>,
+        i64,
+    )> = match (&query.status, &search_pattern, &query.owner_id) {
+        (Some(_), Some(search), Some(owner)) => sqlx::query_as(&sql)
+            .bind(per_page as i64)
+            .bind(offset)
+            .bind(now)
+            .bind(search)
+            .bind(owner)
+            .fetch_all(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?,
+        (Some(_), Some(search), None) => sqlx::query_as(&sql)
+            .bind(per_page as i64)
+            .bind(offset)
+            .bind(now)
+            .bind(search)
+            .fetch_all(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?,
+        (Some(_), None, Some(owner)) => sqlx::query_as(&sql)
+            .bind(per_page as i64)
+            .bind(offset)
+            .bind(now)
+            .bind(owner)
+            .fetch_all(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?,
+        (Some(_), None, None) => sqlx::query_as(&sql)
+            .bind(per_page as i64)
+            .bind(offset)
+            .bind(now)
+            .fetch_all(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?,
+        (None, Some(search), Some(owner)) => sqlx::query_as(&sql)
+            .bind(per_page as i64)
+            .bind(offset)
+            .bind(search)
+            .bind(owner)
+            .fetch_all(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?,
+        (None, Some(search), None) => sqlx::query_as(&sql)
+            .bind(per_page as i64)
+            .bind(offset)
+            .bind(search)
+            .fetch_all(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?,
+        (None, None, Some(owner)) => sqlx::query_as(&sql)
+            .bind(per_page as i64)
+            .bind(offset)
+            .bind(owner)
+            .fetch_all(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?,
+        (None, None, None) => sqlx::query_as(&sql)
+            .bind(per_page as i64)
+            .bind(offset)
+            .fetch_all(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?,
+    };
 
     // Get total count (simplified - just count with visibility filter)
     let total: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM contests WHERE is_public = true OR $1::boolean = false"
+        "SELECT COUNT(*) FROM contests WHERE is_public = true OR $1::boolean = false",
     )
-        .bind(query.public_only)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+    .bind(query.public_only)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
     let contests: Vec<ContestSummary> = rows
         .into_iter()
@@ -266,7 +261,7 @@ pub async fn list_contests(
 }
 
 /// POST /api/v1/contests
-/// 
+///
 /// Create a new contest (organizer/admin only).
 pub async fn create_contest(
     State(state): State<AppState>,
@@ -274,7 +269,9 @@ pub async fn create_contest(
     Json(payload): Json<CreateContestRequest>,
 ) -> ApiResult<(StatusCode, Json<ContestResponse>)> {
     // Validate request
-    payload.validate().map_err(|e| ApiError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| ApiError::Validation(e.to_string()))?;
 
     // Check user role using authorization rules
     let ctx = crate::domain::authorization::build_auth_context(&state, &user);
@@ -282,12 +279,16 @@ pub async fn create_contest(
 
     // Validate times
     if payload.end_time <= payload.start_time {
-        return Err(ApiError::Validation("End time must be after start time".to_string()));
+        return Err(ApiError::Validation(
+            "End time must be after start time".to_string(),
+        ));
     }
 
     if let Some(freeze) = payload.freeze_time {
         if freeze < payload.start_time || freeze > payload.end_time {
-            return Err(ApiError::Validation("Freeze time must be between start and end time".to_string()));
+            return Err(ApiError::Validation(
+                "Freeze time must be between start and end time".to_string(),
+            ));
         }
     }
 
@@ -302,26 +303,26 @@ pub async fn create_contest(
             scoring_type, is_public, is_rated, registration_required, max_participants,
             allowed_languages, owner_id, created_at, updated_at
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15)
-        "#
+        "#,
     )
-        .bind(id)
-        .bind(&payload.title)
-        .bind(&payload.description)
-        .bind(&payload.short_description)
-        .bind(payload.start_time)
-        .bind(payload.end_time)
-        .bind(payload.freeze_time)
-        .bind(payload.scoring_type.to_string())
-        .bind(payload.is_public)
-        .bind(payload.is_rated)
-        .bind(payload.registration_required)
-        .bind(payload.max_participants)
-        .bind(&payload.allowed_languages)
-        .bind(user.id)
-        .bind(now)
-        .execute(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Failed to create contest: {}", e)))?;
+    .bind(id)
+    .bind(&payload.title)
+    .bind(&payload.description)
+    .bind(&payload.short_description)
+    .bind(payload.start_time)
+    .bind(payload.end_time)
+    .bind(payload.freeze_time)
+    .bind(payload.scoring_type.to_string())
+    .bind(payload.is_public)
+    .bind(payload.is_rated)
+    .bind(payload.registration_required)
+    .bind(payload.max_participants)
+    .bind(&payload.allowed_languages)
+    .bind(user.id)
+    .bind(now)
+    .execute(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Failed to create contest: {}", e)))?;
 
     Ok((
         StatusCode::CREATED,
@@ -347,7 +348,7 @@ pub async fn create_contest(
 }
 
 /// GET /api/v1/contests/{id}
-/// 
+///
 /// Get contest details.
 pub async fn get_contest(
     State(state): State<AppState>,
@@ -361,12 +362,12 @@ pub async fn get_contest(
                scoring_type, is_public, is_rated, registration_required, max_participants,
                allowed_languages, owner_id, created_at, updated_at
         FROM contests WHERE id = $1
-        "#
+        "#,
     )
-        .bind(contest_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+    .bind(contest_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
     let contest = contest.ok_or(ApiError::NotFound("Contest not found".to_string()))?;
 
@@ -376,13 +377,13 @@ pub async fn get_contest(
         // Check if user is a collaborator
         if let Some(uid) = user_id {
             let is_collaborator: Option<(i64,)> = sqlx::query_as(
-                "SELECT 1 FROM contest_collaborators WHERE contest_id = $1 AND user_id = $2"
+                "SELECT 1 FROM contest_collaborators WHERE contest_id = $1 AND user_id = $2",
             )
-                .bind(contest_id)
-                .bind(uid)
-                .fetch_optional(&state.db)
-                .await
-                .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+            .bind(contest_id)
+            .bind(uid)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
             if is_collaborator.is_none() {
                 return Err(ApiError::NotFound("Contest not found".to_string()));
@@ -393,50 +394,47 @@ pub async fn get_contest(
     }
 
     // Get owner info
-    let owner: (Uuid, String, Option<String>) = sqlx::query_as(
-        "SELECT id, username, display_name FROM users WHERE id = $1"
-    )
-        .bind(contest.owner_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+    let owner: (Uuid, String, Option<String>) =
+        sqlx::query_as("SELECT id, username, display_name FROM users WHERE id = $1")
+            .bind(contest.owner_id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
     // Get counts
-    let participant_count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM contest_participants WHERE contest_id = $1"
-    )
-        .bind(contest_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+    let participant_count: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM contest_participants WHERE contest_id = $1")
+            .bind(contest_id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
-    let problem_count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM contest_problems WHERE contest_id = $1"
-    )
-        .bind(contest_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+    let problem_count: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM contest_problems WHERE contest_id = $1")
+            .bind(contest_id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
     // Check user's relationship to contest
     let (is_registered, is_collaborator) = if let Some(uid) = user_id {
         let reg: Option<(i64,)> = sqlx::query_as(
-            "SELECT 1 FROM contest_participants WHERE contest_id = $1 AND user_id = $2"
+            "SELECT 1 FROM contest_participants WHERE contest_id = $1 AND user_id = $2",
         )
-            .bind(contest_id)
-            .bind(uid)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+        .bind(contest_id)
+        .bind(uid)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
         let collab: Option<(i64,)> = sqlx::query_as(
-            "SELECT 1 FROM contest_collaborators WHERE contest_id = $1 AND user_id = $2"
+            "SELECT 1 FROM contest_collaborators WHERE contest_id = $1 AND user_id = $2",
         )
-            .bind(contest_id)
-            .bind(uid)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+        .bind(contest_id)
+        .bind(uid)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
         (reg.is_some(), collab.is_some())
     } else {
@@ -476,7 +474,7 @@ pub async fn get_contest(
 }
 
 /// PUT /api/v1/contests/{id}
-/// 
+///
 /// Update contest (owner or collaborator with edit permission).
 pub async fn update_contest(
     State(state): State<AppState>,
@@ -484,12 +482,12 @@ pub async fn update_contest(
     Path(contest_id): Path<Uuid>,
     Json(payload): Json<UpdateContestRequest>,
 ) -> ApiResult<Json<ContestResponse>> {
-    payload.validate().map_err(|e| ApiError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| ApiError::Validation(e.to_string()))?;
 
     // Check contest exists
-    let contest: Option<ContestRow> = sqlx::query_as(
-        "SELECT * FROM contests WHERE id = $1"
-    )
+    let contest: Option<ContestRow> = sqlx::query_as("SELECT * FROM contests WHERE id = $1")
         .bind(contest_id)
         .fetch_optional(&state.db)
         .await
@@ -508,16 +506,23 @@ pub async fn update_contest(
     let start_time = payload.start_time.unwrap_or(contest.start_time);
     let end_time = payload.end_time.unwrap_or(contest.end_time);
     let freeze_time = payload.freeze_time.or(contest.freeze_time);
-    let scoring_type = payload.scoring_type.map(|s| s.to_string()).unwrap_or(contest.scoring_type);
+    let scoring_type = payload
+        .scoring_type
+        .map(|s| s.to_string())
+        .unwrap_or(contest.scoring_type);
     let is_public = payload.is_public.unwrap_or(contest.is_public);
     let is_rated = payload.is_rated.unwrap_or(contest.is_rated);
-    let registration_required = payload.registration_required.unwrap_or(contest.registration_required);
+    let registration_required = payload
+        .registration_required
+        .unwrap_or(contest.registration_required);
     let max_participants = payload.max_participants.or(contest.max_participants);
     let allowed_languages = payload.allowed_languages.or(contest.allowed_languages);
 
     // Validate times
     if end_time <= start_time {
-        return Err(ApiError::Validation("End time must be after start time".to_string()));
+        return Err(ApiError::Validation(
+            "End time must be after start time".to_string(),
+        ));
     }
 
     let now = Utc::now();
@@ -531,25 +536,25 @@ pub async fn update_contest(
             registration_required = $11, max_participants = $12,
             allowed_languages = $13, updated_at = $14
         WHERE id = $1
-        "#
+        "#,
     )
-        .bind(contest_id)
-        .bind(&title)
-        .bind(&description)
-        .bind(&short_description)
-        .bind(start_time)
-        .bind(end_time)
-        .bind(freeze_time)
-        .bind(&scoring_type)
-        .bind(is_public)
-        .bind(is_rated)
-        .bind(registration_required)
-        .bind(max_participants)
-        .bind(&allowed_languages)
-        .bind(now)
-        .execute(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Failed to update contest: {}", e)))?;
+    .bind(contest_id)
+    .bind(&title)
+    .bind(&description)
+    .bind(&short_description)
+    .bind(start_time)
+    .bind(end_time)
+    .bind(freeze_time)
+    .bind(&scoring_type)
+    .bind(is_public)
+    .bind(is_rated)
+    .bind(registration_required)
+    .bind(max_participants)
+    .bind(&allowed_languages)
+    .bind(now)
+    .execute(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Failed to update contest: {}", e)))?;
 
     Ok(Json(ContestResponse {
         id: contest_id,
@@ -572,7 +577,7 @@ pub async fn update_contest(
 }
 
 /// DELETE /api/v1/contests/{id}
-/// 
+///
 /// Delete contest (owner or admin only).
 pub async fn delete_contest(
     State(state): State<AppState>,
@@ -580,9 +585,7 @@ pub async fn delete_contest(
     Path(contest_id): Path<Uuid>,
 ) -> ApiResult<StatusCode> {
     // Check contest exists
-    let contest: Option<(Uuid,)> = sqlx::query_as(
-        "SELECT owner_id FROM contests WHERE id = $1"
-    )
+    let contest: Option<(Uuid,)> = sqlx::query_as("SELECT owner_id FROM contests WHERE id = $1")
         .bind(contest_id)
         .fetch_optional(&state.db)
         .await
@@ -596,7 +599,7 @@ pub async fn delete_contest(
     use crate::domain::authorization::require_contest_owner;
     use olympus_rules::auth_rules::IsAdmin;
     use olympus_rules::specification::Specification;
-    
+
     let is_admin = IsAdmin.is_satisfied_by(&ctx).await;
     if !is_admin {
         require_contest_owner(&ctx).await?;
@@ -616,7 +619,7 @@ pub async fn delete_contest(
 // =============================================================================
 
 /// POST /api/v1/contests/{id}/register
-/// 
+///
 /// Register for a contest.
 pub async fn register_for_contest(
     State(state): State<AppState>,
@@ -638,32 +641,34 @@ pub async fn register_for_contest(
 
     // Check if contest has ended
     if now > contest.1 {
-        return Err(ApiError::Validation("Contest has already ended".to_string()));
+        return Err(ApiError::Validation(
+            "Contest has already ended".to_string(),
+        ));
     }
 
     // Check if already registered
-    let existing: Option<(i64,)> = sqlx::query_as(
-        "SELECT 1 FROM contest_participants WHERE contest_id = $1 AND user_id = $2"
-    )
-        .bind(contest_id)
-        .bind(user.id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+    let existing: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM contest_participants WHERE contest_id = $1 AND user_id = $2")
+            .bind(contest_id)
+            .bind(user.id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
     if existing.is_some() {
-        return Err(ApiError::Validation("Already registered for this contest".to_string()));
+        return Err(ApiError::Validation(
+            "Already registered for this contest".to_string(),
+        ));
     }
 
     // Check max participants
     if let Some(max) = contest.3 {
-        let count: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM contest_participants WHERE contest_id = $1"
-        )
-            .bind(contest_id)
-            .fetch_one(&state.db)
-            .await
-            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+        let count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM contest_participants WHERE contest_id = $1")
+                .bind(contest_id)
+                .fetch_one(&state.db)
+                .await
+                .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
         if count.0 >= max as i64 {
             return Err(ApiError::Validation("Contest is full".to_string()));
@@ -675,14 +680,14 @@ pub async fn register_for_contest(
         r#"
         INSERT INTO contest_participants (contest_id, user_id, registered_at, status)
         VALUES ($1, $2, $3, 'registered')
-        "#
+        "#,
     )
-        .bind(contest_id)
-        .bind(user.id)
-        .bind(now)
-        .execute(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Failed to register: {}", e)))?;
+    .bind(contest_id)
+    .bind(user.id)
+    .bind(now)
+    .execute(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Failed to register: {}", e)))?;
 
     Ok((
         StatusCode::CREATED,
@@ -695,7 +700,7 @@ pub async fn register_for_contest(
 }
 
 /// POST /api/v1/contests/{id}/unregister
-/// 
+///
 /// Unregister from a contest.
 pub async fn unregister_from_contest(
     State(state): State<AppState>,
@@ -703,37 +708,37 @@ pub async fn unregister_from_contest(
     Path(contest_id): Path<Uuid>,
 ) -> ApiResult<Json<MessageResponse>> {
     // Check if registered
-    let existing: Option<(i64,)> = sqlx::query_as(
-        "SELECT 1 FROM contest_participants WHERE contest_id = $1 AND user_id = $2"
-    )
-        .bind(contest_id)
-        .bind(user.id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+    let existing: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM contest_participants WHERE contest_id = $1 AND user_id = $2")
+            .bind(contest_id)
+            .bind(user.id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
     if existing.is_none() {
-        return Err(ApiError::NotFound("Not registered for this contest".to_string()));
+        return Err(ApiError::NotFound(
+            "Not registered for this contest".to_string(),
+        ));
     }
 
     // Check if contest has started (cannot unregister after start)
-    let contest: Option<(DateTime<Utc>,)> = sqlx::query_as(
-        "SELECT start_time FROM contests WHERE id = $1"
-    )
-        .bind(contest_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+    let contest: Option<(DateTime<Utc>,)> =
+        sqlx::query_as("SELECT start_time FROM contests WHERE id = $1")
+            .bind(contest_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
     let contest = contest.ok_or(ApiError::NotFound("Contest not found".to_string()))?;
 
     if Utc::now() >= contest.0 {
-        return Err(ApiError::Validation("Cannot unregister after contest has started".to_string()));
+        return Err(ApiError::Validation(
+            "Cannot unregister after contest has started".to_string(),
+        ));
     }
 
-    sqlx::query(
-        "DELETE FROM contest_participants WHERE contest_id = $1 AND user_id = $2"
-    )
+    sqlx::query("DELETE FROM contest_participants WHERE contest_id = $1 AND user_id = $2")
         .bind(contest_id)
         .bind(user.id)
         .execute(&state.db)
@@ -746,7 +751,7 @@ pub async fn unregister_from_contest(
 }
 
 /// GET /api/v1/contests/{id}/participants
-/// 
+///
 /// List contest participants.
 pub async fn list_participants(
     State(state): State<AppState>,
@@ -754,9 +759,7 @@ pub async fn list_participants(
     Query(query): Query<ListParticipantsQuery>,
 ) -> ApiResult<Json<ParticipantListResponse>> {
     // Check contest exists
-    let exists: Option<(i64,)> = sqlx::query_as(
-        "SELECT 1 FROM contests WHERE id = $1"
-    )
+    let exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM contests WHERE id = $1")
         .bind(contest_id)
         .fetch_optional(&state.db)
         .await
@@ -776,7 +779,11 @@ pub async fn list_participants(
         _ => "cp.registered_at",
     };
 
-    let order = if query.sort_order == "asc" { "ASC" } else { "DESC" };
+    let order = if query.sort_order == "asc" {
+        "ASC"
+    } else {
+        "DESC"
+    };
 
     let sql = format!(
         r#"
@@ -793,22 +800,31 @@ pub async fn list_participants(
         order_by, order
     );
 
-    let rows: Vec<(Uuid, Uuid, String, Option<String>, String, i32, i32, i32, DateTime<Utc>, Option<DateTime<Utc>>)> = 
-        sqlx::query_as(&sql)
-            .bind(contest_id)
-            .bind(per_page as i64)
-            .bind(offset)
-            .fetch_all(&state.db)
-            .await
-            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
-
-    let total: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM contest_participants WHERE contest_id = $1"
-    )
+    let rows: Vec<(
+        Uuid,
+        Uuid,
+        String,
+        Option<String>,
+        String,
+        i32,
+        i32,
+        i32,
+        DateTime<Utc>,
+        Option<DateTime<Utc>>,
+    )> = sqlx::query_as(&sql)
         .bind(contest_id)
-        .fetch_one(&state.db)
+        .bind(per_page as i64)
+        .bind(offset)
+        .fetch_all(&state.db)
         .await
         .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+
+    let total: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM contest_participants WHERE contest_id = $1")
+            .bind(contest_id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
     let participants: Vec<ParticipantInfo> = rows
         .into_iter()
@@ -846,7 +862,7 @@ pub async fn list_participants(
 // =============================================================================
 
 /// GET /api/v1/contests/{id}/collaborators
-/// 
+///
 /// List contest collaborators.
 pub async fn list_collaborators(
     State(state): State<AppState>,
@@ -854,9 +870,7 @@ pub async fn list_collaborators(
     Path(contest_id): Path<Uuid>,
 ) -> ApiResult<Json<CollaboratorListResponse>> {
     // Check contest exists and user has permission to view
-    let contest: Option<(Uuid,)> = sqlx::query_as(
-        "SELECT owner_id FROM contests WHERE id = $1"
-    )
+    let contest: Option<(Uuid,)> = sqlx::query_as("SELECT owner_id FROM contests WHERE id = $1")
         .bind(contest_id)
         .fetch_optional(&state.db)
         .await
@@ -866,21 +880,30 @@ pub async fn list_collaborators(
 
     // Only owner, admin, or collaborators can view
     let is_collaborator: Option<(i64,)> = sqlx::query_as(
-        "SELECT 1 FROM contest_collaborators WHERE contest_id = $1 AND user_id = $2"
+        "SELECT 1 FROM contest_collaborators WHERE contest_id = $1 AND user_id = $2",
     )
-        .bind(contest_id)
-        .bind(user.id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+    .bind(contest_id)
+    .bind(user.id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
     if contest.0 != user.id && user.role != "admin" && is_collaborator.is_none() {
         return Err(ApiError::Forbidden);
     }
 
-    let rows: Vec<(Uuid, Uuid, String, Option<String>, String, bool, bool, bool, DateTime<Utc>)> = 
-        sqlx::query_as(
-            r#"
+    let rows: Vec<(
+        Uuid,
+        Uuid,
+        String,
+        Option<String>,
+        String,
+        bool,
+        bool,
+        bool,
+        DateTime<Utc>,
+    )> = sqlx::query_as(
+        r#"
             SELECT 
                 cc.id, u.id as user_id, u.username, u.display_name,
                 cc.role, cc.can_edit_contest, cc.can_add_problems, cc.can_view_submissions,
@@ -889,12 +912,12 @@ pub async fn list_collaborators(
             JOIN users u ON cc.user_id = u.id
             WHERE cc.contest_id = $1
             ORDER BY cc.added_at DESC
-            "#
-        )
-            .bind(contest_id)
-            .fetch_all(&state.db)
-            .await
-            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+            "#,
+    )
+    .bind(contest_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
     let collaborators: Vec<CollaboratorInfo> = rows
         .into_iter()
@@ -917,7 +940,7 @@ pub async fn list_collaborators(
 }
 
 /// POST /api/v1/contests/{id}/collaborators
-/// 
+///
 /// Add a collaborator to contest.
 pub async fn add_collaborator(
     State(state): State<AppState>,
@@ -925,12 +948,12 @@ pub async fn add_collaborator(
     Path(contest_id): Path<Uuid>,
     Json(payload): Json<AddCollaboratorRequest>,
 ) -> ApiResult<(StatusCode, Json<CollaboratorInfo>)> {
-    payload.validate().map_err(|e| ApiError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| ApiError::Validation(e.to_string()))?;
 
     // Check contest exists and user is owner or admin
-    let contest: Option<(Uuid,)> = sqlx::query_as(
-        "SELECT owner_id FROM contests WHERE id = $1"
-    )
+    let contest: Option<(Uuid,)> = sqlx::query_as("SELECT owner_id FROM contests WHERE id = $1")
         .bind(contest_id)
         .fetch_optional(&state.db)
         .await
@@ -943,28 +966,29 @@ pub async fn add_collaborator(
     }
 
     // Check target user exists
-    let target_user: Option<(Uuid, String, Option<String>)> = sqlx::query_as(
-        "SELECT id, username, display_name FROM users WHERE id = $1"
-    )
-        .bind(payload.user_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+    let target_user: Option<(Uuid, String, Option<String>)> =
+        sqlx::query_as("SELECT id, username, display_name FROM users WHERE id = $1")
+            .bind(payload.user_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
     let target_user = target_user.ok_or(ApiError::NotFound("User not found".to_string()))?;
 
     // Check not already a collaborator
     let existing: Option<(i64,)> = sqlx::query_as(
-        "SELECT 1 FROM contest_collaborators WHERE contest_id = $1 AND user_id = $2"
+        "SELECT 1 FROM contest_collaborators WHERE contest_id = $1 AND user_id = $2",
     )
-        .bind(contest_id)
-        .bind(payload.user_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+    .bind(contest_id)
+    .bind(payload.user_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
     if existing.is_some() {
-        return Err(ApiError::Validation("User is already a collaborator".to_string()));
+        return Err(ApiError::Validation(
+            "User is already a collaborator".to_string(),
+        ));
     }
 
     let id = Uuid::new_v4();
@@ -976,20 +1000,20 @@ pub async fn add_collaborator(
             id, contest_id, user_id, role, can_edit_contest, can_add_problems,
             can_view_submissions, added_at, added_by
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        "#
+        "#,
     )
-        .bind(id)
-        .bind(contest_id)
-        .bind(payload.user_id)
-        .bind(&payload.role)
-        .bind(payload.can_edit_contest)
-        .bind(payload.can_add_problems)
-        .bind(payload.can_view_submissions)
-        .bind(now)
-        .bind(user.id)
-        .execute(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Failed to add collaborator: {}", e)))?;
+    .bind(id)
+    .bind(contest_id)
+    .bind(payload.user_id)
+    .bind(&payload.role)
+    .bind(payload.can_edit_contest)
+    .bind(payload.can_add_problems)
+    .bind(payload.can_view_submissions)
+    .bind(now)
+    .bind(user.id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Failed to add collaborator: {}", e)))?;
 
     Ok((
         StatusCode::CREATED,
@@ -1010,7 +1034,7 @@ pub async fn add_collaborator(
 }
 
 /// DELETE /api/v1/contests/{id}/collaborators/{user_id}
-/// 
+///
 /// Remove a collaborator from contest.
 pub async fn remove_collaborator(
     State(state): State<AppState>,
@@ -1018,9 +1042,7 @@ pub async fn remove_collaborator(
     Path((contest_id, target_user_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<StatusCode> {
     // Check contest exists and user is owner or admin
-    let contest: Option<(Uuid,)> = sqlx::query_as(
-        "SELECT owner_id FROM contests WHERE id = $1"
-    )
+    let contest: Option<(Uuid,)> = sqlx::query_as("SELECT owner_id FROM contests WHERE id = $1")
         .bind(contest_id)
         .fetch_optional(&state.db)
         .await
@@ -1032,14 +1054,13 @@ pub async fn remove_collaborator(
         return Err(ApiError::Forbidden);
     }
 
-    let result = sqlx::query(
-        "DELETE FROM contest_collaborators WHERE contest_id = $1 AND user_id = $2"
-    )
-        .bind(contest_id)
-        .bind(target_user_id)
-        .execute(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Failed to remove collaborator: {}", e)))?;
+    let result =
+        sqlx::query("DELETE FROM contest_collaborators WHERE contest_id = $1 AND user_id = $2")
+            .bind(contest_id)
+            .bind(target_user_id)
+            .execute(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Failed to remove collaborator: {}", e)))?;
 
     if result.rows_affected() == 0 {
         return Err(ApiError::NotFound("Collaborator not found".to_string()));

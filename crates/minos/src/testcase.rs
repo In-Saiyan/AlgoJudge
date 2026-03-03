@@ -70,12 +70,8 @@ impl TestCaseManager {
     async fn touch_testcase_dir(&self, dir: &Path) -> Result<()> {
         let marker = dir.join(".last_access");
         let mut file = fs::File::create(&marker).await?;
-        file.write_all(
-            chrono::Utc::now()
-                .to_rfc3339()
-                .as_bytes(),
-        )
-        .await?;
+        file.write_all(chrono::Utc::now().to_rfc3339().as_bytes())
+            .await?;
         Ok(())
     }
 
@@ -114,10 +110,7 @@ impl TestCaseManager {
             .join("generator");
 
         if !generator_path.exists() {
-            return Err(anyhow!(
-                "Generator not found for problem {}",
-                problem_id
-            ));
+            return Err(anyhow!("Generator not found for problem {}", problem_id));
         }
 
         // Create testcase directory
@@ -128,7 +121,7 @@ impl TestCaseManager {
 
         for i in 1..=num_testcases {
             let input_path = testcase_dir.join(format!("input_{:03}.txt", i));
-            
+
             // Run generator with test case number as argument
             let output = timeout(
                 Duration::from_millis(self.execution.generator_time_limit_ms),
@@ -144,11 +137,7 @@ impl TestCaseManager {
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(anyhow!(
-                    "Generator failed for testcase {}: {}",
-                    i,
-                    stderr
-                ));
+                return Err(anyhow!("Generator failed for testcase {}: {}", i, stderr));
             }
 
             // Write input to file
@@ -218,9 +207,11 @@ impl TestCaseManager {
         // 7 = Points (partial credit)
         match result.status.code() {
             Some(0) => Ok(CheckerResult::Accepted(stdout)),
-            Some(1) | Some(2) => Ok(CheckerResult::WrongAnswer(
-                if stderr.is_empty() { stdout } else { stderr },
-            )),
+            Some(1) | Some(2) => Ok(CheckerResult::WrongAnswer(if stderr.is_empty() {
+                stdout
+            } else {
+                stderr
+            })),
             Some(3) => Ok(CheckerResult::JudgeError(stderr)),
             Some(7) => {
                 // Parse partial points from output

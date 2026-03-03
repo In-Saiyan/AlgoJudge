@@ -21,31 +21,31 @@
 //!
 //! - `auth` - Enable authorization rules that require database/Redis access
 
-pub mod specification;
-pub mod operators;
-pub mod context;
 pub mod config;
-pub mod rules;
+pub mod context;
+pub mod operators;
 pub mod registry;
+pub mod rules;
+pub mod specification;
 
 #[cfg(feature = "auth")]
 pub mod auth_rules;
 
 /// Prelude module - import everything you need with `use olympus_rules::prelude::*`
 pub mod prelude {
-    pub use crate::specification::{
-        Specification, And, Or, Not, AlwaysTrue, AlwaysFalse, BoxedSpec, AllOf, AnyOf,
-    };
+    pub use crate::config::{CleanupAction, CleanupPolicy, NamedRuleConfig, RuleConfig};
+    pub use crate::context::{EvalContext, ExecutionContext, FileContext};
     pub use crate::operators::Spec;
-    pub use crate::context::{EvalContext, FileContext, ExecutionContext};
-    pub use crate::config::{RuleConfig, NamedRuleConfig, CleanupPolicy, CleanupAction};
+    pub use crate::registry::{execution_context_registry, file_context_registry, SpecRegistry};
     pub use crate::rules::*;
-    pub use crate::registry::{SpecRegistry, file_context_registry, execution_context_registry};
-    
-    #[cfg(feature = "auth")]
-    pub use crate::context::AuthContext;
+    pub use crate::specification::{
+        AllOf, AlwaysFalse, AlwaysTrue, And, AnyOf, BoxedSpec, Not, Or, Specification,
+    };
+
     #[cfg(feature = "auth")]
     pub use crate::auth_rules::*;
+    #[cfg(feature = "auth")]
+    pub use crate::context::AuthContext;
     #[cfg(feature = "auth")]
     pub use crate::registry::auth_context_registry;
 }

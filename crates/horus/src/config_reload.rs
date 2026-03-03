@@ -65,11 +65,7 @@ impl PolicyStore {
                     });
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "Skipping policy '{}': invalid config JSON: {}",
-                        row.name,
-                        e
-                    );
+                    tracing::warn!("Skipping policy '{}': invalid config JSON: {}", row.name, e);
                 }
             }
         }
@@ -136,11 +132,7 @@ pub fn start_config_reload_listener(
 }
 
 /// Inner subscription loop with automatic reconnect on failure.
-async fn run_subscriber(
-    redis_url: &str,
-    db: &PgPool,
-    store: &PolicyStore,
-) -> Result<()> {
+async fn run_subscriber(redis_url: &str, db: &PgPool, store: &PolicyStore) -> Result<()> {
     let client = redis::Client::open(redis_url)?;
     let mut pubsub = client.get_async_pubsub().await?;
     pubsub.subscribe("config_reload").await?;
@@ -169,10 +161,7 @@ async fn run_subscriber(
                         }
                     }
                 } else {
-                    tracing::debug!(
-                        "Ignoring config_reload for service: {}",
-                        payload
-                    );
+                    tracing::debug!("Ignoring config_reload for service: {}", payload);
                 }
             }
             None => {

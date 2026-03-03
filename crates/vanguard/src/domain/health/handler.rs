@@ -49,7 +49,7 @@ impl ServiceStatus {
 }
 
 /// GET /health
-/// 
+///
 /// Returns the health status of the API and its dependencies.
 pub async fn health_check(
     State(state): State<AppState>,
@@ -72,18 +72,13 @@ pub async fn health_check(
     let redis_status = {
         let start = std::time::Instant::now();
         match state.redis.get().await {
-            Ok(mut conn) => {
-                match redis::cmd("PING")
-                    .query_async::<String>(&mut conn)
-                    .await
-                {
-                    Ok(_) => ServiceStatus::healthy(start.elapsed().as_millis() as u64),
-                    Err(e) => {
-                        all_healthy = false;
-                        ServiceStatus::unhealthy(e.to_string())
-                    }
+            Ok(mut conn) => match redis::cmd("PING").query_async::<String>(&mut conn).await {
+                Ok(_) => ServiceStatus::healthy(start.elapsed().as_millis() as u64),
+                Err(e) => {
+                    all_healthy = false;
+                    ServiceStatus::unhealthy(e.to_string())
                 }
-            }
+            },
             Err(e) => {
                 all_healthy = false;
                 ServiceStatus::unhealthy(e.to_string())
@@ -108,14 +103,14 @@ pub async fn health_check(
 }
 
 /// GET /health/live
-/// 
+///
 /// Simple liveness probe - returns 200 if the service is running.
 pub async fn liveness() -> StatusCode {
     StatusCode::OK
 }
 
 /// GET /health/ready
-/// 
+///
 /// Readiness probe - returns 200 if the service is ready to accept traffic.
 pub async fn readiness(State(state): State<AppState>) -> StatusCode {
     // Check if we can connect to the database

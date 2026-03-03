@@ -69,7 +69,7 @@ impl Specification<AuthContext> for IsParticipant {
             tracing::warn!("IsParticipant evaluated without contest_id in context");
             return false;
         };
-        
+
         let result: Result<Option<bool>, _> = sqlx::query_scalar(
             r#"SELECT EXISTS(
                 SELECT 1 FROM contest_participants 
@@ -98,7 +98,7 @@ impl Specification<AuthContext> for IsCollaborator {
             tracing::warn!("IsCollaborator evaluated without contest_id in context");
             return false;
         };
-        
+
         let result: Result<Option<bool>, _> = sqlx::query_scalar(
             r#"SELECT EXISTS(
                 SELECT 1 FROM contest_collaborators 
@@ -127,15 +127,18 @@ impl Specification<AuthContext> for IsContestOwner {
             tracing::warn!("IsContestOwner evaluated without contest_id in context");
             return false;
         };
-        
-        let result: Result<Option<Uuid>, _> = sqlx::query_scalar(
-            "SELECT owner_id FROM contests WHERE id = $1",
-        )
-        .bind(contest_id)
-        .fetch_optional(ctx.db.as_ref())
-        .await;
 
-        result.ok().flatten().map(|owner| owner == ctx.user_id).unwrap_or(false)
+        let result: Result<Option<Uuid>, _> =
+            sqlx::query_scalar("SELECT owner_id FROM contests WHERE id = $1")
+                .bind(contest_id)
+                .fetch_optional(ctx.db.as_ref())
+                .await;
+
+        result
+            .ok()
+            .flatten()
+            .map(|owner| owner == ctx.user_id)
+            .unwrap_or(false)
     }
 }
 
@@ -153,7 +156,7 @@ impl Specification<AuthContext> for CanAddProblems {
             tracing::warn!("CanAddProblems evaluated without contest_id in context");
             return false;
         };
-        
+
         // Check if collaborator with can_add_problems permission
         let result: Result<Option<bool>, _> = sqlx::query_scalar(
             r#"SELECT can_add_problems FROM contest_collaborators 
@@ -169,7 +172,7 @@ impl Specification<AuthContext> for CanAddProblems {
 }
 
 // =============================================================================
-// Problem-scoped rules  
+// Problem-scoped rules
 // =============================================================================
 
 /// Check if the user is the owner of the context's problem.
@@ -185,15 +188,18 @@ impl Specification<AuthContext> for IsProblemOwner {
             tracing::warn!("IsProblemOwner evaluated without problem_id in context");
             return false;
         };
-        
-        let result: Result<Option<Uuid>, _> = sqlx::query_scalar(
-            "SELECT owner_id FROM problems WHERE id = $1",
-        )
-        .bind(problem_id)
-        .fetch_optional(ctx.db.as_ref())
-        .await;
 
-        result.ok().flatten().map(|owner| owner == ctx.user_id).unwrap_or(false)
+        let result: Result<Option<Uuid>, _> =
+            sqlx::query_scalar("SELECT owner_id FROM problems WHERE id = $1")
+                .bind(problem_id)
+                .fetch_optional(ctx.db.as_ref())
+                .await;
+
+        result
+            .ok()
+            .flatten()
+            .map(|owner| owner == ctx.user_id)
+            .unwrap_or(false)
     }
 }
 
@@ -218,14 +224,18 @@ impl Specification<AuthContext> for CanAccessProblemBinaries {
         }
 
         // Check if problem owner
-        let owner_result: Result<Option<Uuid>, _> = sqlx::query_scalar(
-            "SELECT owner_id FROM problems WHERE id = $1",
-        )
-        .bind(problem_id)
-        .fetch_optional(ctx.db.as_ref())
-        .await;
+        let owner_result: Result<Option<Uuid>, _> =
+            sqlx::query_scalar("SELECT owner_id FROM problems WHERE id = $1")
+                .bind(problem_id)
+                .fetch_optional(ctx.db.as_ref())
+                .await;
 
-        if owner_result.ok().flatten().map(|o| o == ctx.user_id).unwrap_or(false) {
+        if owner_result
+            .ok()
+            .flatten()
+            .map(|o| o == ctx.user_id)
+            .unwrap_or(false)
+        {
             return true;
         }
 
@@ -265,15 +275,18 @@ impl Specification<AuthContext> for IsSubmissionOwner {
             tracing::warn!("IsSubmissionOwner evaluated without submission_id in context");
             return false;
         };
-        
-        let result: Result<Option<Uuid>, _> = sqlx::query_scalar(
-            "SELECT user_id FROM submissions WHERE id = $1",
-        )
-        .bind(submission_id)
-        .fetch_optional(ctx.db.as_ref())
-        .await;
 
-        result.ok().flatten().map(|owner| owner == ctx.user_id).unwrap_or(false)
+        let result: Result<Option<Uuid>, _> =
+            sqlx::query_scalar("SELECT user_id FROM submissions WHERE id = $1")
+                .bind(submission_id)
+                .fetch_optional(ctx.db.as_ref())
+                .await;
+
+        result
+            .ok()
+            .flatten()
+            .map(|owner| owner == ctx.user_id)
+            .unwrap_or(false)
     }
 }
 
@@ -300,12 +313,12 @@ impl NotRateLimited {
             window_secs,
         }
     }
-    
+
     /// Submission rate limit: 10 per minute
     pub fn submission() -> Self {
         Self::new("submit", 10, 60)
     }
-    
+
     /// API rate limit for authenticated users: 100 per minute
     pub fn api_authenticated() -> Self {
         Self::new("api", 100, 60)
@@ -317,7 +330,7 @@ impl NotRateLimited {
 impl Specification<AuthContext> for NotRateLimited {
     async fn is_satisfied_by(&self, ctx: &AuthContext) -> bool {
         let key = format!("rl:{}:{}", self.action, ctx.user_id);
-        
+
         let conn_result = ctx.redis.get().await;
         let mut conn = match conn_result {
             Ok(c) => c,
@@ -328,10 +341,8 @@ impl Specification<AuthContext> for NotRateLimited {
             }
         };
 
-        let count_result: Result<u64, _> = redis::cmd("GET")
-            .arg(&key)
-            .query_async(&mut *conn)
-            .await;
+        let count_result: Result<u64, _> =
+            redis::cmd("GET").arg(&key).query_async(&mut *conn).await;
 
         match count_result {
             Ok(count) => count < self.limit,
@@ -361,9 +372,9 @@ pub mod composites {
     //! use olympus_rules::auth_rules::*;
     //!
     //! // Build the "can submit" rule
-    //! let can_submit = Spec(IsValidUser) 
-    //!     & ((Spec(NotRateLimited::submission()) & Spec(IsParticipant)) 
-    //!        | Spec(IsAdmin) 
+    //! let can_submit = Spec(IsValidUser)
+    //!     & ((Spec(NotRateLimited::submission()) & Spec(IsParticipant))
+    //!        | Spec(IsAdmin)
     //!        | Spec(IsCollaborator));
     //!
     //! // Evaluate

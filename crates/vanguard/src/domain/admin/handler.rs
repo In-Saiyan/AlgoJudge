@@ -74,10 +74,7 @@ pub async fn admin_list_users(
          FROM users WHERE {} ORDER BY created_at DESC LIMIT $1 OFFSET $2",
         where_clause
     );
-    let count_sql = format!(
-        "SELECT COUNT(*) as count FROM users WHERE {}",
-        where_clause
-    );
+    let count_sql = format!("SELECT COUNT(*) as count FROM users WHERE {}", where_clause);
 
     // Build and execute query with dynamic binds
     let mut q = sqlx::query_as::<_, AdminUserRow>(&sql)
@@ -294,17 +291,14 @@ struct BanRow {
 /// GET /api/v1/admin/stats
 ///
 /// System-wide statistics dashboard.
-pub async fn system_stats(
-    State(state): State<AppState>,
-) -> ApiResult<Json<SystemStatsResponse>> {
+pub async fn system_stats(State(state): State<AppState>) -> ApiResult<Json<SystemStatsResponse>> {
     // User stats
     let total_users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
         .fetch_one(&state.db)
         .await?;
-    let banned_users: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE is_banned = true")
-            .fetch_one(&state.db)
-            .await?;
+    let banned_users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE is_banned = true")
+        .fetch_one(&state.db)
+        .await?;
 
     let role_counts: Vec<(String, i64)> = sqlx::query_as(
         "SELECT role, COUNT(*) as count FROM users GROUP BY role ORDER BY count DESC",
@@ -394,9 +388,7 @@ pub async fn system_stats(
 /// GET /api/v1/admin/queue
 ///
 /// Get Redis Stream queue status for compile_queue and run_queue.
-pub async fn get_queue_info(
-    State(state): State<AppState>,
-) -> ApiResult<Json<QueueInfoResponse>> {
+pub async fn get_queue_info(State(state): State<AppState>) -> ApiResult<Json<QueueInfoResponse>> {
     let mut conn = state.redis.get().await?;
 
     let mut queues = Vec::new();
@@ -410,10 +402,7 @@ pub async fn get_queue_info(
 }
 
 /// Get info about a single Redis Stream.
-async fn get_stream_info(
-    conn: &mut deadpool_redis::Connection,
-    stream_name: &str,
-) -> QueueDetail {
+async fn get_stream_info(conn: &mut deadpool_redis::Connection, stream_name: &str) -> QueueDetail {
     // Get stream length
     let length: i64 = redis::cmd("XLEN")
         .arg(stream_name)
@@ -589,12 +578,10 @@ pub async fn rejudge_submission(
     Path(submission_id): Path<Uuid>,
 ) -> ApiResult<Json<RejudgeResponse>> {
     // Check submission exists
-    let exists: Option<(String,)> = sqlx::query_as(
-        "SELECT status FROM submissions WHERE id = $1",
-    )
-    .bind(submission_id)
-    .fetch_optional(&state.db)
-    .await?;
+    let exists: Option<(String,)> = sqlx::query_as("SELECT status FROM submissions WHERE id = $1")
+        .bind(submission_id)
+        .fetch_optional(&state.db)
+        .await?;
 
     let (current_status,) =
         exists.ok_or_else(|| ApiError::NotFound("Submission not found".to_string()))?;
@@ -818,14 +805,8 @@ pub async fn update_rule(
 
     // Validate config JSON if provided
     if let Some(ref config) = payload.config {
-        serde_json::from_value::<olympus_rules::config::RuleConfig>(config.clone()).map_err(
-            |e| {
-                ApiError::Validation(format!(
-                    "Invalid rule config JSON: {}",
-                    e
-                ))
-            },
-        )?;
+        serde_json::from_value::<olympus_rules::config::RuleConfig>(config.clone())
+            .map_err(|e| ApiError::Validation(format!("Invalid rule config JSON: {}", e)))?;
     }
 
     // Build dynamic update query
@@ -838,13 +819,13 @@ pub async fn update_rule(
     .await?
     .ok_or_else(|| ApiError::NotFound("Rule configuration not found".to_string()))?;
 
-    let new_description = payload.description.as_deref().or(existing.description.as_deref());
+    let new_description = payload
+        .description
+        .as_deref()
+        .or(existing.description.as_deref());
     let new_config = payload.config.as_ref().unwrap_or(&existing.config);
     let new_enabled = payload.enabled.unwrap_or(existing.enabled);
-    let new_version = payload
-        .version
-        .as_deref()
-        .unwrap_or(&existing.version);
+    let new_version = payload.version.as_deref().unwrap_or(&existing.version);
 
     let row = sqlx::query_as::<_, RuleConfigRow>(
         r#"

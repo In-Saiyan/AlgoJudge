@@ -9,13 +9,16 @@ use sqlx::{FromRow, Row};
 use uuid::Uuid;
 use validator::Validate;
 
+use super::{
+    request::{ListUsersQuery, UpdateUserRequest},
+    response::{
+        Pagination, UpdateUserResponse, UserListResponse, UserProfileResponse, UserStatsResponse,
+        UserSummary,
+    },
+};
 use crate::error::{ApiError, ApiResult};
 use crate::middleware::auth::AuthUser;
 use crate::state::AppState;
-use super::{
-    request::{ListUsersQuery, UpdateUserRequest},
-    response::{Pagination, UpdateUserResponse, UserListResponse, UserProfileResponse, UserStatsResponse, UserSummary},
-};
 
 /// User summary row from database
 #[derive(Debug, FromRow)]
@@ -40,7 +43,7 @@ struct UserProfileRow {
 }
 
 /// GET /api/v1/users
-/// 
+///
 /// List users with pagination and optional filtering.
 pub async fn list_users(
     State(state): State<AppState>,
@@ -51,9 +54,8 @@ pub async fn list_users(
     let offset = ((page - 1) * per_page) as i64;
 
     // Build dynamic query based on filters
-    let mut sql = String::from(
-        "SELECT id, username, display_name, role, created_at FROM users WHERE 1=1"
-    );
+    let mut sql =
+        String::from("SELECT id, username, display_name, role, created_at FROM users WHERE 1=1");
     let mut count_sql = String::from("SELECT COUNT(*) FROM users WHERE 1=1");
 
     if let Some(ref role) = query.role {
@@ -126,9 +128,7 @@ pub async fn list_users(
                 .bind(offset)
                 .fetch_all(&state.db)
                 .await?;
-            let total: (i64,) = sqlx::query_as(count_sql)
-                .fetch_one(&state.db)
-                .await?;
+            let total: (i64,) = sqlx::query_as(count_sql).fetch_one(&state.db).await?;
             (users, total.0)
         }
     };
@@ -156,7 +156,7 @@ pub async fn list_users(
 }
 
 /// GET /api/v1/users/{id}
-/// 
+///
 /// Get a user's public profile.
 pub async fn get_user(
     State(state): State<AppState>,
@@ -181,7 +181,7 @@ pub async fn get_user(
 }
 
 /// PUT /api/v1/users/{id}
-/// 
+///
 /// Update a user's profile. Only the owner can update their profile.
 pub async fn update_user(
     State(state): State<AppState>,
@@ -195,7 +195,9 @@ pub async fn update_user(
     }
 
     // Validate request
-    payload.validate().map_err(|e| ApiError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| ApiError::Validation(e.to_string()))?;
 
     // Update user
     let now = Utc::now();
@@ -207,7 +209,7 @@ pub async fn update_user(
             updated_at = $3
         WHERE id = $4
         RETURNING id, username, display_name, bio, role, updated_at
-        "#
+        "#,
     )
     .bind(&payload.display_name)
     .bind(&payload.bio)
@@ -228,7 +230,7 @@ pub async fn update_user(
 }
 
 /// GET /api/v1/users/{id}/stats
-/// 
+///
 /// Get a user's statistics.
 pub async fn get_user_stats(
     State(state): State<AppState>,

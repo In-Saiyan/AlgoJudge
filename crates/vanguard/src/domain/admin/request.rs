@@ -40,7 +40,8 @@ fn validate_role(role: &str) -> Result<(), validator::ValidationError> {
         "admin" | "organizer" | "participant" | "spectator" => Ok(()),
         _ => {
             let mut err = validator::ValidationError::new("invalid_role");
-            err.message = Some("Role must be one of: admin, organizer, participant, spectator".into());
+            err.message =
+                Some("Role must be one of: admin, organizer, participant, spectator".into());
             Err(err)
         }
     }
