@@ -1,5 +1,6 @@
 //! Domain modules containing business logic and handlers.
 
+pub mod admin;
 pub mod auth;
 pub mod authorization;
 pub mod contests;

@@ -97,7 +97,6 @@ pub async fn optional_auth_middleware(
 /// Admin-only middleware.
 /// 
 /// Requires the user to have admin role.
-#[allow(dead_code)]
 pub async fn admin_middleware(
     State(_state): State<AppState>,
     request: Request,

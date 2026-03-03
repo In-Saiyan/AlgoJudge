@@ -23,8 +23,8 @@ use tower_http::{
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config::{create_db_pool, create_redis_pool, Config, RateLimitConfig};
-use crate::domain::{auth, contests, health, problems, submissions, users};
-use crate::middleware::{auth::auth_middleware, rate_limit::*};
+use crate::domain::{admin, auth, contests, health, problems, submissions, users};
+use crate::middleware::{auth::{auth_middleware, admin_middleware}, rate_limit::*};
 use crate::state::AppState;
 
 #[tokio::main]
@@ -222,6 +222,27 @@ fn create_router(state: AppState) -> Router {
                 .layer(axum_middleware::from_fn_with_state(state.clone(), auth_middleware)),
         );
 
+    // Admin routes (requires auth + admin role)
+    let admin_routes = Router::new()
+        .route("/users", get(admin::admin_list_users))
+        .route("/users/{id}/role", axum::routing::put(admin::update_user_role))
+        .route("/users/{id}/ban", post(admin::ban_user))
+        .route("/users/{id}/unban", post(admin::unban_user))
+        .route("/stats", get(admin::system_stats))
+        .route("/queue", get(admin::get_queue_info))
+        .route("/queue/{id}/rejudge", post(admin::rejudge_submission))
+        .route("/rules", get(admin::list_rules))
+        .route("/rules", post(admin::save_rule))
+        .route("/rules/{id}", axum::routing::put(admin::update_rule))
+        .layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            admin_middleware,
+        ))
+        .layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ));
+
     // API v1 routes
     let api_v1 = Router::new()
         .nest("/auth", auth_routes)
@@ -232,6 +253,7 @@ fn create_router(state: AppState) -> Router {
         .merge(Router::new().nest("/contests", contest_leaderboard_routes))
         .nest("/problems", problem_routes)
         .nest("/submissions", submission_routes)
+        .nest("/admin", admin_routes)
         .layer(axum_middleware::from_fn_with_state(
             state.clone(),
             api_rate_limit_middleware,

@@ -8,6 +8,7 @@
 
 mod cleaner;
 mod config;
+pub mod config_reload;
 mod scheduler;
 mod specs;
 
@@ -18,6 +19,7 @@ use anyhow::Result;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config::Config;
+use crate::config_reload::{PolicyStore, start_config_reload_listener};
 use crate::scheduler::CleanupScheduler;
 
 #[tokio::main]
@@ -73,6 +75,21 @@ async fn main() -> Result<()> {
         tracing::info!("Shutdown signal received");
         shutdown_clone.store(true, Ordering::SeqCst);
     });
+
+    // Initialize policy store and load initial policies from database
+    let policy_store = PolicyStore::new();
+    match policy_store.load_from_db(&db_pool).await {
+        Ok(count) => tracing::info!("Loaded {} initial policies from database", count),
+        Err(e) => tracing::warn!("Could not load policies from database (table may not exist yet): {}", e),
+    }
+
+    // Start Redis pub/sub listener for config reload
+    let _reload_handle = start_config_reload_listener(
+        config.redis_url.clone(),
+        db_pool.clone(),
+        policy_store.clone(),
+    );
+    tracing::info!("Config reload listener started");
 
     // Create and setup scheduler
     let mut scheduler = CleanupScheduler::new(config, db_pool).await?;
