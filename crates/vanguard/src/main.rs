@@ -242,8 +242,13 @@ fn create_router(state: AppState) -> Router {
         .route("/users/{id}/ban", post(admin::ban_user))
         .route("/users/{id}/unban", post(admin::unban_user))
         .route("/stats", get(admin::system_stats))
+        .route("/containers", get(admin::list_containers))
         .route("/queue", get(admin::get_queue_info))
         .route("/queue/{id}/rejudge", post(admin::rejudge_submission))
+        .route(
+            "/contests/{id}/rejudge",
+            post(admin::rejudge_contest),
+        )
         .route("/rules", get(admin::list_rules))
         .route("/rules", post(admin::save_rule))
         .route("/rules/{id}", axum::routing::put(admin::update_rule))

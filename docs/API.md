@@ -139,6 +139,7 @@ All admin endpoints require **Admin** role (double middleware: `auth_middleware`
 | Method | Endpoint | Description | Auth |
 |--------|----------|-------------|------|
 | GET | `/api/v1/admin/stats` | Get system statistics (users, contests, submissions, storage) | Yes (Admin) |
+| GET | `/api/v1/admin/containers` | List running Docker containers (Sisyphus compilation containers) with resource usage | Yes (Admin) |
 
 ### Submission Queue
 
@@ -146,6 +147,7 @@ All admin endpoints require **Admin** role (double middleware: `auth_middleware`
 |--------|----------|-------------|------|
 | GET | `/api/v1/admin/queue` | Get queue info (`XLEN`, `XINFO GROUPS`, `XPENDING` for compile_queue + run_queue) | Yes (Admin) |
 | POST | `/api/v1/admin/queue/{id}/rejudge` | Rejudge a submission (resets status to pending, deletes old results, re-queues to compile_queue) | Yes (Admin) |
+| POST | `/api/v1/admin/contests/{id}/rejudge` | Rejudge all submissions in a contest (skips in-progress, batch resets + re-queues) | Yes (Admin) |
 
 ### Rule Configuration
 

@@ -346,12 +346,12 @@ This is an incremental implementation roadmap. Complete phases in order. Each ph
 
 #### 7.2 System Management
 - [x] Implement `GET /api/v1/admin/stats` (user/contest/submission/storage counts)
-- [ ] Implement `GET /api/v1/admin/containers` (list running Docker containers with resource usage which are part of the system, i.e. Sisyphus compile containers, or the containers spawned by sisyphus for compilation if we go with the host path translation strategy) 
+- [x] Implement `GET /api/v1/admin/containers` (list running Docker containers with resource usage which are part of the system, i.e. Sisyphus compile containers, or the containers spawned by sisyphus for compilation if we go with the host path translation strategy) 
 
 #### 7.3 Queue Management
 - [x] Implement `GET /api/v1/admin/queue` (XLEN + XINFO GROUPS + XPENDING for both streams)
 - [x] Implement `POST /api/v1/admin/queue/{id}/rejudge` (reset status, delete results, re-queue)
-- [ ] Implement `GET /api/v1/admin/contest/{id}/rejudge` (rejudge all submissions in a contest)
+- [x] Implement `POST /api/v1/admin/contests/{id}/rejudge` (rejudge all submissions in a contest)
 
 #### 7.4 Rule Configuration
 - [x] Implement `GET /api/v1/admin/rules` (filterable by service, enabled)

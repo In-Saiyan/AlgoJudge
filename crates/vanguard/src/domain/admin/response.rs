@@ -154,6 +154,44 @@ pub struct RejudgeResponse {
     pub message: String,
 }
 
+/// Response after contest-wide rejudge
+#[derive(Debug, Serialize)]
+pub struct ContestRejudgeResponse {
+    pub contest_id: Uuid,
+    pub rejudged_count: usize,
+    pub skipped_count: usize,
+    pub message: String,
+}
+
+// =============================================================================
+// Container Management
+// =============================================================================
+
+/// Info about a running Docker container
+#[derive(Debug, Serialize)]
+pub struct ContainerInfo {
+    pub container_id: String,
+    pub image: String,
+    pub status: String,
+    pub created: String,
+    pub state: String,
+    /// CPU usage percentage (from docker stats)
+    pub cpu_percent: Option<String>,
+    /// Memory usage string (from docker stats)
+    pub memory_usage: Option<String>,
+    /// Network I/O string (from docker stats)
+    pub net_io: Option<String>,
+    /// PIDs inside the container
+    pub pids: Option<String>,
+}
+
+/// Response for container listing
+#[derive(Debug, Serialize)]
+pub struct ContainerListResponse {
+    pub containers: Vec<ContainerInfo>,
+    pub total: usize,
+}
+
 // =============================================================================
 // Rule Configuration
 // =============================================================================

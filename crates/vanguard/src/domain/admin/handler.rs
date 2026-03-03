@@ -914,3 +914,274 @@ fn row_to_response(row: RuleConfigRow) -> RuleConfigResponse {
         updated_at: row.updated_at,
     }
 }
+
+// =============================================================================
+// 7.2 Container Management
+// =============================================================================
+
+/// GET /api/v1/admin/containers
+///
+/// List running Docker containers that are part of the system (Sisyphus
+/// compilation containers). Uses `docker ps` and `docker stats` under the
+/// hood.
+pub async fn list_containers(
+    State(_state): State<AppState>,
+) -> ApiResult<Json<ContainerListResponse>> {
+    use std::collections::HashMap;
+    use tokio::process::Command;
+
+    // Known compilation images — any running container using one of these is
+    // likely a Sisyphus compile container.
+    let known_images: &[&str] = &[
+        "gcc", "rust", "golang", "python", "zig", "euantorano/zig", "ubuntu",
+    ];
+
+    // 1. List running containers as JSON
+    let ps_output = Command::new("docker")
+        .args([
+            "ps",
+            "--no-trunc",
+            "--format",
+            "{{.ID}}\t{{.Image}}\t{{.Status}}\t{{.CreatedAt}}\t{{.State}}",
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| {
+            ApiError::Internal(format!(
+                "Failed to run docker ps — is the Docker socket accessible? {}",
+                e
+            ))
+        })?;
+
+    if !ps_output.status.success() {
+        let stderr = String::from_utf8_lossy(&ps_output.stderr);
+        return Err(ApiError::Internal(format!(
+            "docker ps failed: {}",
+            stderr.trim()
+        )));
+    }
+
+    let ps_stdout = String::from_utf8_lossy(&ps_output.stdout);
+
+    // Parse tab-delimited lines
+    let mut containers: Vec<ContainerInfo> = Vec::new();
+    for line in ps_stdout.lines() {
+        let parts: Vec<&str> = line.splitn(5, '\t').collect();
+        if parts.len() < 5 {
+            continue;
+        }
+        let (id, image, status, created, state) =
+            (parts[0], parts[1], parts[2], parts[3], parts[4]);
+
+        // Filter: only include containers whose image matches a known
+        // compilation image prefix.
+        let is_sisyphus = known_images
+            .iter()
+            .any(|prefix| image.starts_with(prefix));
+        if !is_sisyphus {
+            continue;
+        }
+
+        containers.push(ContainerInfo {
+            container_id: id.to_string(),
+            image: image.to_string(),
+            status: status.to_string(),
+            created: created.to_string(),
+            state: state.to_string(),
+            cpu_percent: None,
+            memory_usage: None,
+            net_io: None,
+            pids: None,
+        });
+    }
+
+    // 2. Get resource usage via `docker stats --no-stream` for matched
+    //    containers (skip if none are running).
+    if !containers.is_empty() {
+        let ids: Vec<String> = containers.iter().map(|c| c.container_id.clone()).collect();
+        let mut stats_args = vec![
+            "stats".to_string(),
+            "--no-stream".to_string(),
+            "--format".to_string(),
+            "{{.ID}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.PIDs}}".to_string(),
+        ];
+        stats_args.extend(ids);
+
+        let stats_output = Command::new("docker")
+            .args(&stats_args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .await
+            .ok();
+
+        if let Some(output) = stats_output {
+            if output.status.success() {
+                let stats_stdout = String::from_utf8_lossy(&output.stdout);
+                let mut stats_map: HashMap<String, (String, String, String, String)> =
+                    HashMap::new();
+                for line in stats_stdout.lines() {
+                    let parts: Vec<&str> = line.splitn(5, '\t').collect();
+                    if parts.len() >= 5 {
+                        stats_map.insert(
+                            parts[0].to_string(),
+                            (
+                                parts[1].to_string(),
+                                parts[2].to_string(),
+                                parts[3].to_string(),
+                                parts[4].to_string(),
+                            ),
+                        );
+                    }
+                }
+                for c in &mut containers {
+                    // docker stats may use short IDs
+                    if let Some((cpu, mem, net, pids)) = stats_map.get(&c.container_id) {
+                        c.cpu_percent = Some(cpu.clone());
+                        c.memory_usage = Some(mem.clone());
+                        c.net_io = Some(net.clone());
+                        c.pids = Some(pids.clone());
+                    } else {
+                        // Try matching by prefix (docker stats often uses short IDs)
+                        for (sid, (cpu, mem, net, pids)) in &stats_map {
+                            if c.container_id.starts_with(sid.as_str())
+                                || sid.starts_with(&c.container_id)
+                            {
+                                c.cpu_percent = Some(cpu.clone());
+                                c.memory_usage = Some(mem.clone());
+                                c.net_io = Some(net.clone());
+                                c.pids = Some(pids.clone());
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let total = containers.len();
+    Ok(Json(ContainerListResponse { containers, total }))
+}
+
+// =============================================================================
+// 7.3 Contest Rejudge
+// =============================================================================
+
+/// Database row for submissions to rejudge
+#[derive(Debug, FromRow)]
+struct RejudgeSubmissionRow {
+    id: Uuid,
+    status: String,
+    file_path: Option<String>,
+}
+
+/// POST /api/v1/admin/contests/{id}/rejudge
+///
+/// Rejudge all submissions in a contest. Skips submissions that are currently
+/// compiling or judging.
+pub async fn rejudge_contest(
+    State(state): State<AppState>,
+    Extension(admin): Extension<AuthUser>,
+    Path(contest_id): Path<Uuid>,
+) -> ApiResult<Json<ContestRejudgeResponse>> {
+    // Verify contest exists
+    let contest_exists: Option<(Uuid,)> =
+        sqlx::query_as("SELECT id FROM contests WHERE id = $1")
+            .bind(contest_id)
+            .fetch_optional(&state.db)
+            .await?;
+
+    if contest_exists.is_none() {
+        return Err(ApiError::NotFound("Contest not found".to_string()));
+    }
+
+    // Fetch all submissions for this contest
+    let submissions: Vec<RejudgeSubmissionRow> = sqlx::query_as(
+        "SELECT id, status, file_path FROM submissions WHERE contest_id = $1",
+    )
+    .bind(contest_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    let mut rejudged_count = 0usize;
+    let mut skipped_count = 0usize;
+    let mut rejudge_ids: Vec<Uuid> = Vec::new();
+
+    for sub in &submissions {
+        if sub.status == "compiling" || sub.status == "judging" {
+            skipped_count += 1;
+            continue;
+        }
+        rejudge_ids.push(sub.id);
+    }
+
+    if !rejudge_ids.is_empty() {
+        // Batch reset all eligible submissions
+        sqlx::query(
+            r#"
+            UPDATE submissions
+            SET status = 'pending',
+                score = NULL,
+                passed_test_cases = NULL,
+                max_time_ms = NULL,
+                max_memory_kb = NULL,
+                compilation_log = NULL,
+                compiled_at = NULL,
+                judged_at = NULL
+            WHERE id = ANY($1)
+            "#,
+        )
+        .bind(&rejudge_ids)
+        .execute(&state.db)
+        .await?;
+
+        // Batch delete old results
+        sqlx::query("DELETE FROM submission_results WHERE submission_id = ANY($1)")
+            .bind(&rejudge_ids)
+            .execute(&state.db)
+            .await?;
+
+        // Push each submission to compile_queue
+        let mut conn = state.redis.get().await?;
+        for sub in &submissions {
+            if !rejudge_ids.contains(&sub.id) {
+                continue;
+            }
+            redis::cmd("XADD")
+                .arg("compile_queue")
+                .arg("*")
+                .arg("submission_id")
+                .arg(sub.id.to_string())
+                .arg("file_path")
+                .arg(sub.file_path.as_deref().unwrap_or(""))
+                .arg("priority")
+                .arg("1")
+                .query_async::<String>(&mut conn)
+                .await?;
+            rejudged_count += 1;
+        }
+    }
+
+    tracing::info!(
+        admin_id = %admin.id,
+        contest_id = %contest_id,
+        rejudged = rejudged_count,
+        skipped = skipped_count,
+        "Admin requested contest-wide rejudge"
+    );
+
+    Ok(Json(ContestRejudgeResponse {
+        contest_id,
+        rejudged_count,
+        skipped_count,
+        message: format!(
+            "Rejudged {} submissions, skipped {} (in-progress)",
+            rejudged_count, skipped_count
+        ),
+    }))
+}
