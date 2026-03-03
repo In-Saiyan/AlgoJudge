@@ -188,7 +188,7 @@ struct ContestCheckRow {
     allowed_languages: Option<Vec<String>>,
 }
 
-/// POST /api/v1/submissions/zip - Submit ZIP file (algorithmic benchmark)
+/// POST /api/v1/submissions/upload - Submit ZIP file (algorithmic benchmark)
 ///
 /// If `contest_id` is provided, validates the contest is active and the user
 /// is authorized to submit. If omitted, this is a standalone submission.

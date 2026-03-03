@@ -113,13 +113,13 @@ Base URL: `/api/v1`
 |--------|----------|-------------|------|
 | GET | `/api/v1/submissions` | List submissions | Yes |
 | POST | `/api/v1/submissions` | Create submission (source code; `contest_id` optional) | Yes |
-| POST | `/api/v1/submissions/zip` | Upload ZIP submission (multipart; `contest_id` optional) | Yes |
+| POST | `/api/v1/submissions/upload` | Upload ZIP submission (multipart; `contest_id` optional) | Yes |
 | GET | `/api/v1/submissions/{id}` | Get submission by ID | Yes (Owner/Admin) |
 | GET | `/api/v1/submissions/{id}/results` | Get submission test results | Yes (Owner/Admin) |
 | GET | `/api/v1/submissions/{id}/source` | Download submission source/ZIP | Yes (Owner/Admin) |
 
 > **Standalone submissions:** Both `POST /api/v1/submissions` and
-> `POST /api/v1/submissions/zip` accept submissions without a `contest_id`.
+> `POST /api/v1/submissions/upload` accept submissions without a `contest_id`.
 > When omitted, the submission is a standalone practice run against the problem
 > without contest rules (time window, allowed languages, participant check).
 >
@@ -219,7 +219,7 @@ All API endpoints are rate limited. Responses include rate limit headers:
 
 All file uploads use `multipart/form-data` format instead of base64 encoding for efficiency and streaming support.
 
-### ZIP Submission Upload (`POST /api/v1/submissions/zip`)
+### ZIP Submission Upload (`POST /api/v1/submissions/upload`)
 
 **Content-Type:** `multipart/form-data`
 
@@ -250,12 +250,12 @@ All file uploads use `multipart/form-data` format instead of base64 encoding for
 **Example (curl):**
 ```bash
 # Contest submission with language hint
-curl -X POST "https://api.algojudge.com/api/v1/submissions/zip?contest_id=...&problem_id=...&language=cpp" \
+curl -X POST "https://api.algojudge.com/api/v1/submissions/upload?contest_id=...&problem_id=...&language=cpp" \
   -H "Authorization: Bearer <token>" \
   -F "file=@submission.zip"
 
 # Standalone submission (no contest, no language hint — relies on compile.sh)
-curl -X POST "https://api.algojudge.com/api/v1/submissions/zip?problem_id=..." \
+curl -X POST "https://api.algojudge.com/api/v1/submissions/upload?problem_id=..." \
   -H "Authorization: Bearer <token>" \
   -F "file=@submission.zip"
 ```

@@ -197,7 +197,7 @@ fn create_router(state: AppState) -> Router {
     // Create routes with additional submission rate limit
     let submission_create_routes = Router::new()
         .route("/", post(submissions::create_submission))
-        .route("/zip", post(submissions::create_zip_submission))
+        .route("/upload", post(submissions::create_zip_submission))
         .layer(axum_middleware::from_fn_with_state(
             state.clone(),
             submission_rate_limit_middleware,
