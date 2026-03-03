@@ -150,9 +150,12 @@ impl Sandbox {
         // Disable swap so OOM kill triggers at the real limit.
         let _ = fs::write(dir.join("memory.swap.max"), "0").await;
 
-        // pids.max — add a small buffer for shell wrapper processes.
+        // pids.max — add a buffer for runtime threads (Go needs ~10 for
+        // GC/scheduler, Rust/C++ need fewer but still a handful for
+        // signal handlers and I/O threads).  +16 is generous enough
+        // for any runtime while still preventing fork bombs.
         if max_pids > 0 {
-            let limit = (max_pids as u64).saturating_add(4);
+            let limit = (max_pids as u64).saturating_add(16);
             fs::write(dir.join("pids.max"), limit.to_string())
                 .await
                 .context("set pids.max")?;

@@ -848,7 +848,7 @@ Problems require:
 - Network: Disabled via `unshare(CLONE_NEWNET)` when `network_allowed=false`
 - Timeout: Per-problem time limit + 100ms buffer
 - Memory: Per-problem limit via cgroups v2 (`memory.max`, swap disabled)
-- PIDs: `max_threads + 4` via cgroups v2 (`pids.max`)
+- PIDs: `max_threads + 16` via cgroups v2 (`pids.max`) — buffer for runtime threads (Go GC, etc.)
 - Process: `stdin=null`, `kill_on_drop=true`
 - **No seccomp profile** (not yet implemented)
 
@@ -856,7 +856,7 @@ Problems require:
 - Network: Disabled via `unshare(CLONE_NEWNET)` (always)
 - Timeout: 60s each (configurable via `GENERATOR_TIME_LIMIT_MS`, `CHECKER_TIME_LIMIT_MS`)
 - Memory: Configurable via cgroups v2 (`GENERATOR_MEMORY_LIMIT_KB` default 4GB, `CHECKER_MEMORY_LIMIT_KB` default 4GB)
-- PIDs: Limited (`pids.max = 5`) via cgroups v2
+- PIDs: Limited (`pids.max = max_pids + 16`) via cgroups v2
 - Process: `stdin=null`, `kill_on_drop=true`
 - OOM detection via `memory.events` → `oom_kill` counter
 - **No seccomp profile** (not yet implemented)
