@@ -8,7 +8,9 @@ Base URL: `/api/v1`
 
 | Method | Endpoint | Description | Auth |
 |--------|----------|-------------|------|
-| GET | `/health` | Health check | No |
+| GET | `/health` | Health check (returns service status + uptime) | No |
+| GET | `/health/live` | Liveness probe (always OK) | No |
+| GET | `/health/ready` | Readiness probe (checks DB + Redis) | No |
 
 ---
 
@@ -70,12 +72,11 @@ Base URL: `/api/v1`
 | POST | `/api/v1/contests/{id}/problems` | Add problem to contest | Yes (Owner/Collaborator/Admin) |
 | DELETE | `/api/v1/contests/{id}/problems/{problem_id}` | Remove problem from contest | Yes (Owner/Collaborator/Admin) |
 
-### Contest Leaderboard & Virtual Participation
+### Contest Leaderboard
 
 | Method | Endpoint | Description | Auth |
 |--------|----------|-------------|------|
-| GET | `/api/v1/contests/{id}/leaderboard` | Get contest leaderboard | Yes |
-| POST | `/api/v1/contests/{id}/virtual` | Start virtual participation | Yes |
+| GET | `/api/v1/contests/{id}/leaderboard` | Get contest leaderboard (ICPC-style scoring) | Yes |
 
 ---
 
@@ -112,14 +113,13 @@ Base URL: `/api/v1`
 |--------|----------|-------------|------|
 | GET | `/api/v1/submissions` | List submissions | Yes |
 | POST | `/api/v1/submissions` | Create submission (source code; `contest_id` optional) | Yes |
-| POST | `/api/v1/submissions/upload` | Upload ZIP submission (multipart; `contest_id` optional) | Yes |
+| POST | `/api/v1/submissions/zip` | Upload ZIP submission (multipart; `contest_id` optional) | Yes |
 | GET | `/api/v1/submissions/{id}` | Get submission by ID | Yes (Owner/Admin) |
 | GET | `/api/v1/submissions/{id}/results` | Get submission test results | Yes (Owner/Admin) |
 | GET | `/api/v1/submissions/{id}/source` | Download submission source/ZIP | Yes (Owner/Admin) |
-| GET | `/api/v1/submissions/{id}/logs` | Get compilation/runtime logs | Yes (Owner/Admin) |
 
 > **Standalone submissions:** Both `POST /api/v1/submissions` and
-> `POST /api/v1/submissions/upload` accept submissions without a `contest_id`.
+> `POST /api/v1/submissions/zip` accept submissions without a `contest_id`.
 > When omitted, the submission is a standalone practice run against the problem
 > without contest rules (time window, allowed languages, participant check).
 >
@@ -147,16 +147,27 @@ All admin endpoints require **Admin** role.
 
 | Method | Endpoint | Description | Auth |
 |--------|----------|-------------|------|
-| GET | `/api/v1/admin/stats` | Get system statistics | Yes (Admin) |
-| GET | `/api/v1/admin/containers` | List running benchmark containers | Yes (Admin) |
-| DELETE | `/api/v1/admin/containers/{id}` | Stop/remove container | Yes (Admin) |
+| GET | `/api/v1/admin/stats` | Get system statistics (users, contests, submissions, storage) | Yes (Admin) |
 
 ### Submission Queue
 
 | Method | Endpoint | Description | Auth |
 |--------|----------|-------------|------|
-| GET | `/api/v1/admin/queue` | Get pending submission queue | Yes (Admin) |
-| POST | `/api/v1/admin/queue/{id}/rejudge` | Rejudge a submission | Yes (Admin) |
+| GET | `/api/v1/admin/queue` | Get queue info (compile_queue + run_queue consumer groups, pending entries) | Yes (Admin) |
+| POST | `/api/v1/admin/queue/{id}/rejudge` | Rejudge a submission (resets status, re-queues to compile_queue) | Yes (Admin) |
+
+### Rule Configuration
+
+| Method | Endpoint | Description | Auth |
+|--------|----------|-------------|------|
+| GET | `/api/v1/admin/rules` | List rule configs (filterable by `service`, `enabled`) | Yes (Admin) |
+| POST | `/api/v1/admin/rules` | Create or upsert a rule config (validates JSON against SpecRegistry) | Yes (Admin) |
+| PUT | `/api/v1/admin/rules/{id}` | Update an existing rule config | Yes (Admin) |
+
+> Rule configs are stored in the `rule_configs` table and can target any service
+> (`vanguard`, `minos`, `horus`). After saving, a Redis pub/sub notification is
+> published on the `config_reload` channel so the target service hot-reloads the
+> new policy without restarting.
 
 ---
 
@@ -208,7 +219,7 @@ All API endpoints are rate limited. Responses include rate limit headers:
 
 All file uploads use `multipart/form-data` format instead of base64 encoding for efficiency and streaming support.
 
-### Submission Upload (`POST /api/v1/submissions/upload`)
+### ZIP Submission Upload (`POST /api/v1/submissions/zip`)
 
 **Content-Type:** `multipart/form-data`
 
@@ -239,12 +250,12 @@ All file uploads use `multipart/form-data` format instead of base64 encoding for
 **Example (curl):**
 ```bash
 # Contest submission with language hint
-curl -X POST "https://api.algojudge.com/api/v1/submissions/upload?contest_id=...&problem_id=...&language=cpp" \
+curl -X POST "https://api.algojudge.com/api/v1/submissions/zip?contest_id=...&problem_id=...&language=cpp" \
   -H "Authorization: Bearer <token>" \
   -F "file=@submission.zip"
 
 # Standalone submission (no contest, no language hint — relies on compile.sh)
-curl -X POST "https://api.algojudge.com/api/v1/submissions/upload?problem_id=..." \
+curl -X POST "https://api.algojudge.com/api/v1/submissions/zip?problem_id=..." \
   -H "Authorization: Bearer <token>" \
   -F "file=@submission.zip"
 ```
