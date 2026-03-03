@@ -125,19 +125,12 @@ impl Compiler {
             &self.config,
             &spec,
             build_dir,
-            &["sh", "-c", "echo '--- /workspace listing ---' && ls -la /workspace && echo '--- running compile.sh ---' && chmod +x ./compile.sh && ./compile.sh"],
+            &["sh", "-c", "./compile.sh"],
         )
         .await?;
 
         if !output.success {
-            // Include stdout in the error too, for the workspace listing
-            let mut detail = String::new();
-            if !output.stdout.is_empty() {
-                detail.push_str(&output.stdout);
-                detail.push('\n');
-            }
-            detail.push_str(&output.stderr);
-            return Err(anyhow!("Compilation failed:\n{}", detail));
+            return Err(anyhow!("Compilation failed:\n{}", output.stderr));
         }
 
         // Find and copy the compiled binary

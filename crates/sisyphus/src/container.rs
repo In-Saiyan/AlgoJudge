@@ -140,14 +140,30 @@ pub async fn run_in_container(
         .canonicalize()
         .with_context(|| format!("Could not canonicalize {}", build_dir.display()))?;
 
-    // When running as a sibling container (Docker-out-of-Docker), the
-    // bind-mount source path must be expressed as a *host* path.
-    // Translate the container-internal path (e.g. `/mnt/data/temp/builds/...`)
-    // to the host-side volume path (e.g. `/var/lib/docker/volumes/.../...`).
-    let host_build_dir = if let Some(ref host_base) = config.docker_host_data_path {
+    // Strategy 1 (preferred): Mount the Docker named volume directly.
+    // This is the most reliable approach for Docker-out-of-Docker because
+    // Docker resolves the storage location itself — no host-path guessing.
+    //
+    // Strategy 2: Translate the container-internal path to a host path
+    // using DOCKER_HOST_DATA_PATH.
+    //
+    // Strategy 3: Pass through as-is (works on bare metal).
+    if let Some(ref vol_name) = config.docker_volume_name {
+        // Mount the named volume at the same path as inside Sisyphus,
+        // then set -w to the actual build directory within that mount.
+        args.push("-v".into());
+        args.push(format!("{}:{}:rw", vol_name, config.data_path));
+        args.push("-w".into());
+        args.push(build_dir_abs.display().to_string());
+        tracing::debug!(
+            volume = %vol_name,
+            workdir = %build_dir_abs.display(),
+            "Mounting named volume into compilation container"
+        );
+    } else if let Some(ref host_base) = config.docker_host_data_path {
         let container_prefix = &config.data_path;
         let abs_str = build_dir_abs.display().to_string();
-        if let Some(suffix) = abs_str.strip_prefix(container_prefix) {
+        let host_build_dir = if let Some(suffix) = abs_str.strip_prefix(container_prefix) {
             format!("{}{}", host_base, suffix)
         } else {
             tracing::warn!(
@@ -156,15 +172,17 @@ pub async fn run_in_container(
                 "Build dir not under data_path — using as-is (bind-mount may fail)"
             );
             abs_str
-        }
+        };
+        args.push("-v".into());
+        args.push(format!("{}:/workspace", host_build_dir));
+        args.push("-w".into());
+        args.push("/workspace".into());
     } else {
-        build_dir_abs.display().to_string()
-    };
-
-    args.push("-v".into());
-    args.push(format!("{}:/workspace", host_build_dir));
-    args.push("-w".into());
-    args.push("/workspace".into());
+        args.push("-v".into());
+        args.push(format!("{}:/workspace", build_dir_abs.display()));
+        args.push("-w".into());
+        args.push("/workspace".into());
+    }
 
     // ── Image ─────────────────────────────────────────────
     args.push(spec.image.clone());
@@ -178,7 +196,6 @@ pub async fn run_in_container(
         image = %spec.image,
         language = %spec.language,
         build_dir = %build_dir.display(),
-        host_build_dir = %host_build_dir,
         cmd = ?command,
         "Spawning compilation container"
     );

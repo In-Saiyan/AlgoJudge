@@ -72,6 +72,14 @@ pub struct Config {
     /// When `None`, paths are passed through as-is (works when
     /// Sisyphus runs directly on the host, not in a container).
     pub docker_host_data_path: Option<String>,
+    /// Docker named volume to mount into sibling compilation containers.
+    /// When set (e.g. `algojudge_olympus_data`), the volume is mounted
+    /// directly at `data_path` inside the sibling container and the
+    /// build directory is used as the working directory.  This is more
+    /// reliable than `docker_host_data_path` because Docker resolves
+    /// the storage location itself.
+    /// Takes precedence over `docker_host_data_path` when both are set.
+    pub docker_volume_name: Option<String>,
 }
 
 impl Config {
@@ -124,6 +132,9 @@ impl Config {
                 .unwrap_or_else(|_| "/mnt/data/temp/builds".to_string()),
             data_path: env::var("STORAGE_BASE_PATH").unwrap_or_else(|_| "/mnt/data".to_string()),
             docker_host_data_path: env::var("DOCKER_HOST_DATA_PATH")
+                .ok()
+                .filter(|s| !s.is_empty()),
+            docker_volume_name: env::var("DOCKER_VOLUME_NAME")
                 .ok()
                 .filter(|s| !s.is_empty()),
         }
