@@ -54,18 +54,12 @@ pub async fn admin_list_users(
     let mut count_bind_idx = 1u32; // count query has no limit/offset
 
     if query.role.is_some() {
-        conditions.push(format!(
-            "role = ${data}",
-            data = data_bind_idx
-        ));
+        conditions.push(format!("role = ${data}", data = data_bind_idx));
         data_bind_idx += 1;
         count_bind_idx += 1;
     }
     if query.is_banned.is_some() {
-        conditions.push(format!(
-            "is_banned = ${data}",
-            data = data_bind_idx
-        ));
+        conditions.push(format!("is_banned = ${data}", data = data_bind_idx));
         data_bind_idx += 1;
         count_bind_idx += 1;
     }
@@ -98,9 +92,7 @@ pub async fn admin_list_users(
             ci += 1;
         }
         if query.search.is_some() {
-            conds.push(format!(
-                "(username ILIKE ${ci} OR email ILIKE ${ci})"
-            ));
+            conds.push(format!("(username ILIKE ${ci} OR email ILIKE ${ci})"));
         }
         conds.join(" AND ")
     };
@@ -352,16 +344,14 @@ pub async fn system_stats(State(state): State<AppState>) -> ApiResult<Json<Syste
     )
     .fetch_one(&state.db)
     .await?;
-    let draft_contests: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM contests WHERE start_time > NOW()",
-    )
-    .fetch_one(&state.db)
-    .await?;
-    let finished_contests: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM contests WHERE end_time <= NOW()",
-    )
-    .fetch_one(&state.db)
-    .await?;
+    let draft_contests: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM contests WHERE start_time > NOW()")
+            .fetch_one(&state.db)
+            .await?;
+    let finished_contests: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM contests WHERE end_time <= NOW()")
+            .fetch_one(&state.db)
+            .await?;
 
     // Submission stats
     let total_submissions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM submissions")
@@ -398,7 +388,10 @@ pub async fn system_stats(State(state): State<AppState>) -> ApiResult<Json<Syste
             banned: banned_users,
             by_role: role_counts
                 .into_iter()
-                .map(|r| RoleCount { role: r.role, count: r.count })
+                .map(|r| RoleCount {
+                    role: r.role,
+                    count: r.count,
+                })
                 .collect(),
         },
         contests: ContestStats {

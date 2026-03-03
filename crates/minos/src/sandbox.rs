@@ -37,22 +37,15 @@ impl Sandbox {
     /// Sets memory, swap and PID limits via cgroups v2.  If the cgroup
     /// filesystem is not writable the sandbox degrades gracefully and only
     /// `/proc`-based monitoring is available.
-    pub async fn create(
-        sandbox_id: &str,
-        memory_limit_kb: u64,
-        max_pids: i32,
-    ) -> Self {
+    pub async fn create(sandbox_id: &str, memory_limit_kb: u64, max_pids: i32) -> Self {
         let cgroup_dir = PathBuf::from(CGROUP_BASE).join(sandbox_id);
 
-        let cgroup_available =
-            Self::setup_cgroup(&cgroup_dir, memory_limit_kb, max_pids)
-                .await
-                .unwrap_or_else(|e| {
-                    tracing::debug!(
-                        "cgroups v2 unavailable — falling back to /proc monitoring: {e}"
-                    );
-                    false
-                });
+        let cgroup_available = Self::setup_cgroup(&cgroup_dir, memory_limit_kb, max_pids)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::debug!("cgroups v2 unavailable — falling back to /proc monitoring: {e}");
+                false
+            });
 
         Self {
             cgroup_dir,
@@ -64,19 +57,13 @@ impl Sandbox {
     // Cgroup setup
     // ------------------------------------------------------------------
 
-    async fn setup_cgroup(
-        dir: &Path,
-        memory_limit_kb: u64,
-        max_pids: i32,
-    ) -> Result<bool> {
+    async fn setup_cgroup(dir: &Path, memory_limit_kb: u64, max_pids: i32) -> Result<bool> {
         // Bail early if the cgroup v2 root is not mounted.
         if !PathBuf::from("/sys/fs/cgroup/cgroup.controllers").exists() {
             anyhow::bail!("cgroup v2 not mounted");
         }
 
-        fs::create_dir_all(dir)
-            .await
-            .context("create cgroup dir")?;
+        fs::create_dir_all(dir).await.context("create cgroup dir")?;
 
         // memory.max (bytes)
         let mem_bytes = memory_limit_kb.saturating_mul(1024);
