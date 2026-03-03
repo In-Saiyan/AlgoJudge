@@ -1,7 +1,7 @@
 x-common-env: &common-env
-  DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  DATABASE_URL: postgres://olympus:olympus_dev@postgres:5432/olympus
   REDIS_URL: redis://redis:6379
-  ENVIRONMENT: production
+  ENVIRONMENT: ${ENVIRONMENT:-production}
   STORAGE_BASE_PATH: /mnt/data
 
 services:
@@ -12,25 +12,33 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: olympus-postgres
+    env_file:
+      - .env
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:-olympus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-olympus_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-olympus}
+    # Port exposed only on localhost to prevent external connections
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U olympus"]
       interval: 5s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
     networks:
       - olympus-network
 
   redis:
     image: redis:7-alpine
     container_name: olympus-redis
-    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-256mb} --maxmemory-policy allkeys-lru
+    env_file:
+      - .env
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -38,7 +46,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
     networks:
       - olympus-network
 
@@ -51,12 +58,13 @@ services:
       context: .
       target: vanguard
     container_name: olympus-vanguard
+    env_file:
+      - .env
     environment:
       <<: *common-env
-      JWT_SECRET: ${JWT_SECRET}
+      JWT_SECRET: ${JWT_SECRET:-super_secret_jwt_key_change_in_production}
       HOST: 0.0.0.0
       PORT: 8080
-      RUST_LOG: vanguard=info,sqlx=warn
     ports:
       - "${API_PORT:-8080}:8080"
     volumes:
@@ -70,9 +78,7 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 15s
-    restart: unless-stopped
+      retries: 3
     networks:
       - olympus-network
 
@@ -81,6 +87,8 @@ services:
       context: .
       target: sisyphus
     container_name: olympus-sisyphus
+    env_file:
+      - .env
     environment:
       <<: *common-env
       WORKER_ID: ${SISYPHUS_WORKER_ID:-sisyphus_1}
@@ -90,7 +98,6 @@ services:
       COMPILATION_TIMEOUT_SECS: ${COMPILATION_TIMEOUT_SECS:-30}
       DOCKER_API_VERSION: ${DOCKER_API_VERSION:-1.44}
       DOCKER_HOST_DATA_PATH: ${DOCKER_HOST_DATA_PATH:-}
-      RUST_LOG: sisyphus=info,sqlx=warn
     volumes:
       - olympus_data:/mnt/data
       - /var/run/docker.sock:/var/run/docker.sock
@@ -99,7 +106,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    restart: unless-stopped
     networks:
       - olympus-network
 
@@ -108,14 +114,18 @@ services:
       context: .
       target: minos
     container_name: olympus-minos
+    env_file:
+      - .env
     environment:
       <<: *common-env
       WORKER_ID: ${MINOS_WORKER_ID:-minos_1}
       CONSUMER_GROUP: minos_group
       STREAM_NAME: run_queue
+      METRICS_PORT: ${MINOS_METRICS_PORT:-9091}
       DEFAULT_TIME_LIMIT_MS: ${DEFAULT_TIME_LIMIT_MS:-2000}
       DEFAULT_MEMORY_LIMIT_KB: ${DEFAULT_MEMORY_LIMIT_KB:-262144}
-      RUST_LOG: minos=info,sqlx=warn
+    ports:
+      - "${MINOS_METRICS_PORT:-9091}:9091"
     volumes:
       - olympus_data:/mnt/data
     depends_on:
@@ -123,7 +133,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    restart: unless-stopped
     networks:
       - olympus-network
 
@@ -132,12 +141,13 @@ services:
       context: .
       target: horus
     container_name: olympus-horus
+    env_file:
+      - .env
     environment:
       <<: *common-env
       TESTCASE_STALE_HOURS: ${TESTCASE_STALE_HOURS:-6}
       TEMP_ORPHAN_HOURS: ${TEMP_ORPHAN_HOURS:-1}
       SUBMISSION_RETENTION_DAYS: ${SUBMISSION_RETENTION_DAYS:-0}
-      RUST_LOG: horus=info,sqlx=warn
     volumes:
       - olympus_data:/mnt/data
     depends_on:
@@ -145,7 +155,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    restart: unless-stopped
     networks:
       - olympus-network
 
