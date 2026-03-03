@@ -391,11 +391,23 @@ impl Executor {
             }
         }
         // b) Network namespace isolation — completely disables networking.
+        //    If the container lacks CAP_SYS_ADMIN the unshare call will
+        //    return EPERM.  In that case we log a warning (via stderr,
+        //    since we are post-fork) and continue without isolation.
         if !network_allowed {
             unsafe {
                 cmd.pre_exec(|| {
-                    nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWNET)
-                        .map_err(std::io::Error::from)?;
+                    match nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWNET) {
+                        Ok(()) => {}
+                        Err(_e) => {
+                            // pre_exec runs after fork — tracing is NOT
+                            // safe here, so use plain stderr.
+                            eprintln!(
+                                "[minos] WARNING: unshare(CLONE_NEWNET) failed — \
+                                 submission will run without network isolation"
+                            );
+                        }
+                    }
                     Ok(())
                 });
             }
