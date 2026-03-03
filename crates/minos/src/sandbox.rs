@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Once;
 
 use anyhow::{anyhow, Context, Result};
 use tokio::fs;
@@ -15,6 +16,58 @@ use tokio::time::{timeout, Duration};
 
 /// Base path for cgroup v2 hierarchy used by Minos.
 const CGROUP_BASE: &str = "/sys/fs/cgroup/minos";
+
+/// One-time cgroup v2 root delegation.
+///
+/// In a container with its own cgroup namespace the root
+/// `cgroup.subtree_control` starts empty.  Before we can create child
+/// cgroups with memory/pid controllers we must:
+///   1. Create a "service" child cgroup and move all existing root
+///      processes into it (the kernel forbids enabling controllers on a
+///      cgroup that has processes directly in it).
+///   2. Write `+memory +pids` to the root `cgroup.subtree_control`.
+///
+/// This is run at most once per process lifetime.
+static CGROUP_INIT: Once = Once::new();
+
+fn init_cgroup_root() {
+    let root = Path::new("/sys/fs/cgroup");
+    let controllers_path = root.join("cgroup.controllers");
+
+    // Bail if cgroup v2 isn't mounted at all.
+    if !controllers_path.exists() {
+        tracing::debug!("cgroup v2 root not found — skipping delegation init");
+        return;
+    }
+
+    // Create a service cgroup for the Minos daemon process and its
+    // threads so the root cgroup has no direct members.
+    let service_dir = root.join("minos.service");
+    if let Err(e) = std::fs::create_dir_all(&service_dir) {
+        tracing::warn!("failed to create minos.service cgroup: {e}");
+        return;
+    }
+
+    // Move every PID currently in the root cgroup into minos.service.
+    let procs = match std::fs::read_to_string(root.join("cgroup.procs")) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("failed to read root cgroup.procs: {e}");
+            return;
+        }
+    };
+    let service_procs = service_dir.join("cgroup.procs");
+    for pid in procs.lines().filter(|l| !l.is_empty()) {
+        let _ = std::fs::write(&service_procs, pid);
+    }
+
+    // Now enable memory + pids on the root subtree.
+    if let Err(e) = std::fs::write(root.join("cgroup.subtree_control"), "+memory +pids") {
+        tracing::warn!("failed to enable controllers at root: {e}");
+    } else {
+        tracing::info!("cgroup v2 controllers (memory, pids) delegated at root");
+    }
+}
 
 /// Manages per-submission cgroup-based sandboxing.
 pub struct Sandbox {
@@ -65,6 +118,25 @@ impl Sandbox {
         // Bail early if the cgroup v2 root is not mounted.
         if !PathBuf::from("/sys/fs/cgroup/cgroup.controllers").exists() {
             anyhow::bail!("cgroup v2 not mounted");
+        }
+
+        // One-time: migrate the daemon out of the root cgroup and enable
+        // memory + pids controllers so child cgroups can use them.
+        CGROUP_INIT.call_once(init_cgroup_root);
+
+        // Ensure the parent directory (/sys/fs/cgroup/minos) exists and
+        // has the required controllers delegated to its subtree.
+        if let Some(parent) = dir.parent() {
+            fs::create_dir_all(parent)
+                .await
+                .context("create cgroup parent dir")?;
+            // Enable memory + pids controllers for child cgroups.
+            // This is idempotent and harmless if already set.
+            let _ = fs::write(
+                parent.join("cgroup.subtree_control"),
+                "+memory +pids",
+            )
+            .await;
         }
 
         fs::create_dir_all(dir).await.context("create cgroup dir")?;

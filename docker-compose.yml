@@ -130,9 +130,11 @@ services:
     cap_add:
       - SYS_ADMIN
       - NET_ADMIN
-    # cgroup v2 delegation: mount the host cgroup filesystem so Minos
-    # can create per-sandbox cgroups under /sys/fs/cgroup/minos/.
-    cgroup: host
+    # cgroup v2 delegation: the container needs a writable cgroup tree
+    # so Minos can create per-sandbox cgroups under /sys/fs/cgroup/minos/.
+    # - privileged gives full cgroup write access (scoped to this container)
+    # - apparmor:unconfined prevents Ubuntu's AppArmor from blocking cgroup writes
+    privileged: true
     security_opt:
       - apparmor:unconfined
     ports:

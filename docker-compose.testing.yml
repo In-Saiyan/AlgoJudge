@@ -124,6 +124,14 @@ services:
       METRICS_PORT: ${MINOS_METRICS_PORT:-9091}
       DEFAULT_TIME_LIMIT_MS: ${DEFAULT_TIME_LIMIT_MS:-2000}
       DEFAULT_MEMORY_LIMIT_KB: ${DEFAULT_MEMORY_LIMIT_KB:-262144}
+    # SYS_ADMIN is required for unshare(CLONE_NEWNET) and cgroup writes.
+    # privileged gives full cgroup write access for the sandbox.
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+    privileged: true
+    security_opt:
+      - apparmor:unconfined
     ports:
       - "${MINOS_METRICS_PORT:-9091}:9091"
     volumes:
